@@ -1,8 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
-import { ArrowLeft, Camera, Keyboard, Plus, CheckCircle, Edit3 } from "lucide-react";
+import dynamic from "next/dynamic";
+import { ArrowLeft, Camera, Keyboard, Plus, CheckCircle, Edit3, Usb } from "lucide-react";
+import { useUSBScanner } from "@/hooks/useUSBScanner";
+
+// Dynamic import to avoid SSR issues with camera
+const CameraScanner = dynamic(
+  () => import("@/components/scanner/CameraScanner"),
+  { ssr: false }
+);
 
 interface FoundProduct {
   barcode: string;
@@ -14,7 +22,7 @@ interface FoundProduct {
 }
 
 export default function ScanPage() {
-  const [mode, setMode] = useState<"camera" | "manual">("manual");
+  const [mode, setMode] = useState<"camera" | "manual">("camera");
   const [barcode, setBarcode] = useState("");
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState<FoundProduct | null>(null);
@@ -22,11 +30,13 @@ export default function ScanPage() {
   const [added, setAdded] = useState(false);
   const [manualEntry, setManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
+  const [usbDetected, setUsbDetected] = useState(false);
 
-  const handleManualSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!barcode.trim()) return;
+  // Handle barcode scan (from camera or USB)
+  const handleBarcodeScan = useCallback(async (code: string) => {
+    if (loading) return;
 
+    setBarcode(code);
     setLoading(true);
     setError(null);
     setProduct(null);
@@ -35,11 +45,11 @@ export default function ScanPage() {
 
     try {
       // First check if product exists locally
-      const localRes = await fetch(`/api/products?barcode=${barcode}`);
+      const localRes = await fetch(`/api/products?barcode=${code}`);
       if (localRes.ok) {
         const localProduct = await localRes.json();
         setProduct({
-          barcode,
+          barcode: code,
           name: localProduct.name,
           brand: localProduct.brand,
           image_url: localProduct.image_url,
@@ -51,24 +61,23 @@ export default function ScanPage() {
       }
 
       // Lookup in Open Food Facts (world)
-      let data = await fetchOpenFoodFacts(barcode, "world");
+      let data = await fetchOpenFoodFacts(code, "world");
 
       // Fallback to Polish database
       if (data.status !== 1) {
-        data = await fetchOpenFoodFacts(barcode, "pl");
+        data = await fetchOpenFoodFacts(code, "pl");
       }
 
       if (data.status === 1) {
         const p = data.product;
         setProduct({
-          barcode,
+          barcode: code,
           name: p.product_name_pl || p.product_name || "Nieznana nazwa",
           brand: p.brands,
           image_url: p.image_front_small_url || p.image_url,
           fromLocal: false,
         });
       } else {
-        // Not found - show manual entry option
         setManualEntry(true);
         setManualName("");
       }
@@ -77,6 +86,22 @@ export default function ScanPage() {
     } finally {
       setLoading(false);
     }
+  }, [loading]);
+
+  // USB Scanner listener
+  useUSBScanner({
+    onScan: (code) => {
+      setUsbDetected(true);
+      setTimeout(() => setUsbDetected(false), 2000);
+      handleBarcodeScan(code);
+    },
+    enabled: !loading && !product,
+  });
+
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!barcode.trim()) return;
+    handleBarcodeScan(barcode.trim());
   };
 
   const fetchOpenFoodFacts = async (code: string, region: string) => {
@@ -105,7 +130,6 @@ export default function ScanPage() {
     try {
       let productId = product.localProductId;
 
-      // If product doesn't exist locally, create it first
       if (!productId) {
         const productData: { name: string; barcode: string; brand?: string; image_url?: string } = {
           name: product.name,
@@ -129,7 +153,6 @@ export default function ScanPage() {
       }
 
       if (action === "add") {
-        // Add to inventory
         const inventoryRes = await fetch("/api/inventory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -144,7 +167,6 @@ export default function ScanPage() {
           throw new Error("Nie udalo sie dodac do inwentarza");
         }
       } else {
-        // For remove, we'd need to find the inventory item first
         const inventoryRes = await fetch("/api/inventory");
         const inventory = await inventoryRes.json();
         const item = inventory.find((i: { product_id: number }) => i.product_id === productId);
@@ -159,7 +181,6 @@ export default function ScanPage() {
       setAdded(true);
       setBarcode("");
 
-      // Reset after 2 seconds
       setTimeout(() => {
         setProduct(null);
         setAdded(false);
@@ -192,6 +213,14 @@ export default function ScanPage() {
         <h1 className="text-2xl font-bold">Skanuj kod kreskowy</h1>
       </header>
 
+      {/* USB Scanner indicator */}
+      {usbDetected && (
+        <div className="mb-4 p-3 bg-primary/10 text-primary rounded-lg flex items-center gap-2 text-sm">
+          <Usb className="w-4 h-4" />
+          Wykryto skan USB
+        </div>
+      )}
+
       {/* Mode selector */}
       <div className="flex gap-2 mb-6">
         <button
@@ -218,22 +247,59 @@ export default function ScanPage() {
         </button>
       </div>
 
-      {mode === "camera" ? (
-        <div className="bg-card rounded-lg border p-8 text-center">
-          <Camera className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-          <p className="text-muted-foreground mb-4">
-            Skanowanie kamera bedzie dostepne po dodaniu biblioteki ZXing-js
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Na razie uzyj trybu recznego lub skanera USB
-          </p>
+      {/* Loading overlay */}
+      {loading && (
+        <div className="mb-4 p-4 bg-muted rounded-lg text-center">
+          <div className="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full mx-auto mb-2" />
+          <p className="text-sm text-muted-foreground">Szukam produktu...</p>
         </div>
-      ) : manualEntry ? (
-        // Manual product entry when not found in Open Food Facts
+      )}
+
+      {/* Main content based on state */}
+      {!loading && !product && !manualEntry && (
+        <>
+          {mode === "camera" ? (
+            <CameraScanner
+              onScan={handleBarcodeScan}
+              onError={(err) => setError(err)}
+            />
+          ) : (
+            <form onSubmit={handleManualSubmit} className="space-y-4">
+              <div>
+                <label htmlFor="barcode" className="block text-sm font-medium mb-2">
+                  Kod kreskowy (EAN/UPC)
+                </label>
+                <input
+                  type="text"
+                  id="barcode"
+                  value={barcode}
+                  onChange={(e) => setBarcode(e.target.value)}
+                  placeholder="np. 5900497017848"
+                  className="w-full px-4 py-3 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                  autoFocus
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={!barcode.trim()}
+                className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+              >
+                Szukaj
+              </button>
+              <p className="text-xs text-muted-foreground text-center">
+                Przykladowe kody: 5900497017848 (7UP), 5901234123457
+              </p>
+            </form>
+          )}
+        </>
+      )}
+
+      {/* Manual entry when not found */}
+      {!loading && manualEntry && (
         <div className="space-y-4">
           <div className="p-4 bg-muted rounded-lg">
             <p className="text-sm text-muted-foreground mb-2">
-              Kod <span className="font-mono font-medium">{barcode}</span> nie znaleziony w bazie Open Food Facts.
+              Kod <span className="font-mono font-medium">{barcode}</span> nie znaleziony w bazie.
             </p>
             <p className="text-sm">Wprowadz nazwe produktu recznie:</p>
           </div>
@@ -270,37 +336,11 @@ export default function ScanPage() {
             </button>
           </div>
         </div>
-      ) : !product ? (
-        <form onSubmit={handleManualSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="barcode" className="block text-sm font-medium mb-2">
-              Kod kreskowy (EAN/UPC)
-            </label>
-            <input
-              type="text"
-              id="barcode"
-              value={barcode}
-              onChange={(e) => setBarcode(e.target.value)}
-              placeholder="np. 5900497017848"
-              className="w-full px-4 py-3 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
-              autoFocus
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={loading || !barcode.trim()}
-            className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
-          >
-            {loading ? "Szukam..." : "Szukaj"}
-          </button>
+      )}
 
-          <p className="text-xs text-muted-foreground text-center">
-            Przykladowe kody: 5900497017848 (7UP), 5901234123457
-          </p>
-        </form>
-      ) : (
+      {/* Product found */}
+      {!loading && product && (
         <div className="space-y-4">
-          {/* Product card */}
           <div className="bg-card rounded-lg border p-4">
             <div className="flex gap-4">
               {product.image_url && (
@@ -336,15 +376,13 @@ export default function ScanPage() {
             <div className="flex gap-2">
               <button
                 onClick={() => handleAddToInventory("remove")}
-                disabled={loading}
-                className="flex-1 py-3 px-4 border rounded-lg font-medium hover:bg-accent transition-colors disabled:opacity-50"
+                className="flex-1 py-3 px-4 border rounded-lg font-medium hover:bg-accent transition-colors"
               >
                 Wyrzuc (-1)
               </button>
               <button
                 onClick={() => handleAddToInventory("add")}
-                disabled={loading}
-                className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
               >
                 <Plus className="w-5 h-5" />
                 Dodaj (+1)
@@ -361,6 +399,7 @@ export default function ScanPage() {
         </div>
       )}
 
+      {/* Error message */}
       {error && (
         <div className="mt-4 p-4 bg-destructive/10 text-destructive rounded-lg">
           {error}
@@ -369,10 +408,12 @@ export default function ScanPage() {
 
       {/* USB Scanner hint */}
       <div className="mt-8 p-4 bg-muted rounded-lg">
-        <h3 className="font-medium mb-2">Skaner USB</h3>
+        <div className="flex items-center gap-2 mb-2">
+          <Usb className="w-4 h-4" />
+          <h3 className="font-medium">Skaner USB</h3>
+        </div>
         <p className="text-sm text-muted-foreground">
-          Jesli masz skaner USB, po prostu zeskanuj kod - zostanie automatycznie wykryty
-          (skanery USB emuluja klawiature i wysylaja kod + Enter)
+          Skaner USB jest aktywny. Po prostu zeskanuj kod - zostanie automatycznie wykryty.
         </p>
       </div>
     </main>
