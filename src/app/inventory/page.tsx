@@ -122,7 +122,7 @@ export default function InventoryPage() {
   }
 
   return (
-    <main className="container mx-auto px-4 py-8 max-w-lg">
+    <main className="container mx-auto px-4 py-8 max-w-5xl">
       <header className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <Link
@@ -146,22 +146,38 @@ export default function InventoryPage() {
         </p>
       </header>
 
-      {/* Category filter */}
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-6 -mx-4 px-4">
-        {categories.map((cat) => (
-          <button
-            key={cat}
-            onClick={() => setFilter(cat)}
-            className={`px-4 py-2 rounded-full text-sm whitespace-nowrap transition-colors ${
-              filter === cat
-                ? "bg-primary text-primary-foreground"
-                : "bg-card border hover:bg-accent"
-            }`}
-          >
-            {cat === "all" ? "Wszystkie" : cat}
-          </button>
-        ))}
-      </div>
+      <div className="flex gap-6">
+        {/* Sidebar - category filter */}
+        <aside className="w-48 flex-shrink-0">
+          <nav className="sticky top-8 space-y-1">
+            {categories.map((cat) => {
+              const count = cat === "all"
+                ? inventory.length
+                : groupedInventory[cat]?.length || 0;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setFilter(cat)}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                    filter === cat
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-muted"
+                  }`}
+                >
+                  <span className="block truncate">
+                    {cat === "all" ? "Wszystkie" : cat}
+                  </span>
+                  <span className={`text-xs ${filter === cat ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                    {count} {count === 1 ? "produkt" : "produktow"}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+
+        {/* Main content */}
+        <div className="flex-1 min-w-0">
 
       {inventory.length === 0 ? (
         <div className="text-center py-12">
@@ -200,6 +216,8 @@ export default function InventoryPage() {
           ))}
         </div>
       )}
+        </div>
+      </div>
     </main>
   );
 }
