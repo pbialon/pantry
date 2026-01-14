@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { ArrowLeft, Camera, Keyboard, Plus, CheckCircle, Edit3, Usb } from "lucide-react";
+import { ArrowLeft, Camera, Keyboard, Plus, Minus, CheckCircle, Edit3, Usb, Trash2 } from "lucide-react";
 import { useUSBScanner } from "@/hooks/useUSBScanner";
 
 // Dynamic import to avoid SSR issues with camera
@@ -27,7 +27,7 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [product, setProduct] = useState<FoundProduct | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [added, setAdded] = useState(false);
+  const [actionDone, setActionDone] = useState<"added" | "removed" | null>(null);
   const [manualEntry, setManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
   const [usbDetected, setUsbDetected] = useState(false);
@@ -40,7 +40,7 @@ export default function ScanPage() {
     setLoading(true);
     setError(null);
     setProduct(null);
-    setAdded(false);
+    setActionDone(null);
     setManualEntry(false);
 
     try {
@@ -178,12 +178,12 @@ export default function ScanPage() {
         }
       }
 
-      setAdded(true);
+      setActionDone(action === "add" ? "added" : "removed");
       setBarcode("");
 
       setTimeout(() => {
         setProduct(null);
-        setAdded(false);
+        setActionDone(null);
       }, 2000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Blad podczas dodawania");
@@ -196,7 +196,7 @@ export default function ScanPage() {
     setProduct(null);
     setError(null);
     setBarcode("");
-    setAdded(false);
+    setActionDone(null);
     setManualEntry(false);
   };
 
@@ -211,6 +211,7 @@ export default function ScanPage() {
           Powrot
         </Link>
         <h1 className="text-2xl font-bold">Skanuj kod kreskowy</h1>
+        <p className="text-muted-foreground mt-1">Wyrzucasz cos? Zeskanuj kod.</p>
       </header>
 
       {/* USB Scanner indicator */}
@@ -367,25 +368,33 @@ export default function ScanPage() {
             </div>
           </div>
 
-          {added ? (
-            <div className="p-4 bg-primary/10 text-primary rounded-lg flex items-center gap-2">
+          {actionDone ? (
+            <div className={`p-4 rounded-lg flex items-center gap-2 ${
+              actionDone === "removed"
+                ? "bg-orange-100 text-orange-700"
+                : "bg-primary/10 text-primary"
+            }`}>
               <CheckCircle className="w-5 h-5" />
-              Dodano do inwentarza!
+              {actionDone === "removed" ? "Usunieto z inwentarza!" : "Dodano do inwentarza!"}
             </div>
           ) : (
-            <div className="flex gap-2">
+            <div className="space-y-3">
+              {/* Primary action: Remove */}
               <button
                 onClick={() => handleAddToInventory("remove")}
-                className="flex-1 py-3 px-4 border rounded-lg font-medium hover:bg-accent transition-colors"
+                className="w-full py-4 px-4 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors flex items-center justify-center gap-2 text-lg"
               >
+                <Trash2 className="w-6 h-6" />
                 Wyrzuc (-1)
               </button>
+
+              {/* Secondary action: Add */}
               <button
                 onClick={() => handleAddToInventory("add")}
-                className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                className="w-full py-2 px-4 border rounded-lg font-medium hover:bg-accent transition-colors flex items-center justify-center gap-2 text-sm text-muted-foreground"
               >
-                <Plus className="w-5 h-5" />
-                Dodaj (+1)
+                <Plus className="w-4 h-4" />
+                Lub dodaj do inwentarza (+1)
               </button>
             </div>
           )}
