@@ -17,14 +17,15 @@ export default function CameraScanner({ onScan, onError }: CameraScannerProps) {
   const [selectedDevice, setSelectedDevice] = useState<string>("");
   const [lastScanned, setLastScanned] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [apiAvailable, setApiAvailable] = useState(true);
 
-  // Initialize reader and get camera devices
+  // Initialize reader
   useEffect(() => {
     const reader = new BrowserMultiFormatReader();
     readerRef.current = reader;
 
     // Check if MediaDevices API is available (requires HTTPS)
-    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
       const isLocalhost = typeof window !== "undefined" &&
         (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
@@ -34,48 +35,64 @@ export default function CameraScanner({ onScan, onError }: CameraScannerProps) {
       } else {
         setError("Twoja przegladarka nie wspiera dostepu do kamery");
       }
+      setApiAvailable(false);
       return;
     }
-
-    // Get available video devices
-    navigator.mediaDevices
-      .enumerateDevices()
-      .then((deviceList) => {
-        const videoDevices = deviceList.filter((d) => d.kind === "videoinput");
-        setDevices(videoDevices);
-
-        // Prefer back camera on mobile
-        const backCamera = videoDevices.find(
-          (d) =>
-            d.label.toLowerCase().includes("back") ||
-            d.label.toLowerCase().includes("rear") ||
-            d.label.toLowerCase().includes("environment")
-        );
-        if (backCamera) {
-          setSelectedDevice(backCamera.deviceId);
-        } else if (videoDevices.length > 0) {
-          setSelectedDevice(videoDevices[0].deviceId);
-        }
-      })
-      .catch((err) => {
-        console.error("Error getting devices:", err);
-        setError("Nie mozna uzyskac dostepu do kamer");
-      });
 
     return () => {
       stopScanning();
     };
   }, []);
 
+  // Get devices after permission is granted
+  const refreshDevices = async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+
+    try {
+      const deviceList = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = deviceList.filter((d) => d.kind === "videoinput");
+      setDevices(videoDevices);
+
+      // Prefer back camera on mobile
+      const backCamera = videoDevices.find(
+        (d) =>
+          d.label.toLowerCase().includes("back") ||
+          d.label.toLowerCase().includes("rear") ||
+          d.label.toLowerCase().includes("environment")
+      );
+      if (backCamera) {
+        setSelectedDevice(backCamera.deviceId);
+      } else if (videoDevices.length > 0) {
+        setSelectedDevice(videoDevices[0].deviceId);
+      }
+    } catch (err) {
+      console.error("Error getting devices:", err);
+    }
+  };
+
   const startScanning = async () => {
-    if (!readerRef.current || !videoRef.current || !selectedDevice) return;
+    if (!readerRef.current || !videoRef.current) return;
 
     setError(null);
     setIsScanning(true);
 
     try {
+      // Use selectedDevice if available, otherwise use facingMode constraint for back camera
+      const deviceId = selectedDevice || undefined;
+      const constraints: MediaStreamConstraints = deviceId
+        ? { video: { deviceId: { exact: deviceId } } }
+        : { video: { facingMode: "environment" } };
+
+      // First request camera permission
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      stream.getTracks().forEach(track => track.stop()); // Stop this stream, we'll use ZXing's
+
+      // Refresh device list after permission granted
+      await refreshDevices();
+
+      // Now start decoding
       await readerRef.current.decodeFromVideoDevice(
-        selectedDevice,
+        selectedDevice || null,
         videoRef.current,
         (result, err) => {
           if (result) {
@@ -96,7 +113,11 @@ export default function CameraScanner({ onScan, onError }: CameraScannerProps) {
       );
     } catch (err) {
       console.error("Error starting scanner:", err);
-      setError("Nie mozna uruchomic skanera. Sprawdz uprawnienia kamery.");
+      if (err instanceof Error && err.name === "NotAllowedError") {
+        setError("Dostep do kamery zostal zablokowany. Sprawdz uprawnienia w ustawieniach przegladarki.");
+      } else {
+        setError("Nie mozna uruchomic skanera. Sprawdz uprawnienia kamery.");
+      }
       onError?.("Nie mozna uruchomic skanera");
       setIsScanning(false);
     }
@@ -197,7 +218,7 @@ export default function CameraScanner({ onScan, onError }: CameraScannerProps) {
         ) : (
           <button
             onClick={startScanning}
-            disabled={!selectedDevice}
+            disabled={!apiAvailable}
             className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
           >
             <Camera className="w-5 h-5" />
