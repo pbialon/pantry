@@ -48,6 +48,30 @@ Przyklady:
 
 Odpowiadaj TYLKO w formacie JSON array, bez dodatkowego tekstu.`;
 
+const RECEIPT_PARSE_PROMPT = `Jestes ekspertem od parsowania polskich paragonow fiskalnych.
+
+Z podanego tekstu OCR wyodrebnij TYLKO nazwy produktow spozywczych/domowych.
+
+IGNORUJ calkowicie:
+- Nazwy sklepow, adresy, NIP
+- Daty, godziny, numery paragonow
+- Ceny, sumy, PTU, podatki
+- Numery kas, kasjerow, terminali
+- Kody transakcji, numery kart
+- Slowa: PARAGON, FISKALNY, SUMA, RAZEM, PLN, GOTOWKA, RESZTA, KARTA, SPRZEDAZ, OPODATKOWANA, NIEFISKALNY, POTWIERDZENIE
+
+WYODREBNIJ produkty takie jak:
+- Mleko, jajka, chleb, maslo, ser
+- Owoce, warzywa, mieso
+- Napoje, slodycze, przekaski
+- Chemia domowa
+
+Dla kazdego produktu zwroc JSON:
+{"name": "nazwa produktu", "brand": "marka jesli widoczna", "category": "kategoria"}
+
+Odpowiedz TYLKO jako JSON object z kluczem "products" zawierajacym array.`;
+
+
 export async function categorizeProducts(
   products: string[]
 ): Promise<ParsedProduct[]> {
@@ -77,6 +101,38 @@ export async function categorizeProducts(
     const parsed = JSON.parse(content);
     // Handle both array and object with "products" key
     const items = Array.isArray(parsed) ? parsed : parsed.products || [];
+    return items as ParsedProduct[];
+  } catch {
+    throw new Error("Nieprawidlowa odpowiedz AI");
+  }
+}
+
+export async function parseReceiptWithAI(
+  ocrText: string
+): Promise<ParsedProduct[]> {
+  if (!ocrText.trim()) return [];
+
+  const response = await getOpenAIClient().chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      { role: "system", content: RECEIPT_PARSE_PROMPT },
+      {
+        role: "user",
+        content: `Tekst OCR z paragonu:\n\n${ocrText}`,
+      },
+    ],
+    temperature: 0.1,
+    response_format: { type: "json_object" },
+  });
+
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error("Brak odpowiedzi od AI");
+  }
+
+  try {
+    const parsed = JSON.parse(content);
+    const items = parsed.products || [];
     return items as ParsedProduct[];
   } catch {
     throw new Error("Nieprawidlowa odpowiedz AI");

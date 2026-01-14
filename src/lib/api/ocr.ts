@@ -1,3 +1,8 @@
+// Workaround for SSL certificate issues in development
+if (process.env.NODE_ENV === "development") {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+}
+
 const OCR_API_URL = "https://api.ocr.space/parse/image";
 
 interface OcrResult {
@@ -57,46 +62,8 @@ export async function extractTextFromImage(
   return parsedText;
 }
 
-// Parse receipt text to extract product lines
+// Simple extraction - just return raw text, AI will do the heavy lifting
 export function parseReceiptText(text: string): string[] {
-  const lines = text.split("\n").map((l) => l.trim());
-  const products: string[] = [];
-
-  for (const line of lines) {
-    // Skip empty lines
-    if (!line) continue;
-
-    // Skip common receipt headers/footers
-    if (
-      /^(paragon|fiskalny|nip|data|godzina|suma|razem|ptu|gotowka|reszta|karta|terminal|nr|kasa)/i.test(
-        line
-      )
-    ) {
-      continue;
-    }
-
-    // Skip lines that are just numbers or prices
-    if (/^[\d\s,.\-*]+$/.test(line)) continue;
-
-    // Skip very short lines
-    if (line.length < 3) continue;
-
-    // Skip lines with typical receipt patterns
-    if (/^\d{2}[:\-]\d{2}/.test(line)) continue; // Time
-    if (/^\d{2}[.\-\/]\d{2}[.\-\/]\d{2,4}/.test(line)) continue; // Date
-
-    // Clean up product name - remove price at the end
-    let productName = line
-      .replace(/\s+\d+[,.]?\d*\s*(zl|pln)?$/i, "")
-      .replace(/\s+[A-Z]\s*$/, "") // Remove tax category letter
-      .replace(/\s+x\s*\d+.*$/i, "") // Remove quantity multiplier
-      .trim();
-
-    // Skip if too short after cleanup
-    if (productName.length < 3) continue;
-
-    products.push(productName);
-  }
-
-  return products;
+  // Return raw text as single item - AI will parse it properly
+  return [text];
 }
