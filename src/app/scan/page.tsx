@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Camera, Keyboard, Plus, CheckCircle } from "lucide-react";
+import { ArrowLeft, Camera, Keyboard, Plus, CheckCircle, Edit3 } from "lucide-react";
 
 interface FoundProduct {
   barcode: string;
@@ -20,6 +20,8 @@ export default function ScanPage() {
   const [product, setProduct] = useState<FoundProduct | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
+  const [manualEntry, setManualEntry] = useState(false);
+  const [manualName, setManualName] = useState("");
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,6 +31,7 @@ export default function ScanPage() {
     setError(null);
     setProduct(null);
     setAdded(false);
+    setManualEntry(false);
 
     try {
       // First check if product exists locally
@@ -47,28 +50,51 @@ export default function ScanPage() {
         return;
       }
 
-      // Lookup in Open Food Facts
-      const res = await fetch(
-        `https://world.openfoodfacts.org/api/v0/product/${barcode}.json`
-      );
-      const data = await res.json();
+      // Lookup in Open Food Facts (world)
+      let data = await fetchOpenFoodFacts(barcode, "world");
+
+      // Fallback to Polish database
+      if (data.status !== 1) {
+        data = await fetchOpenFoodFacts(barcode, "pl");
+      }
 
       if (data.status === 1) {
+        const p = data.product;
         setProduct({
           barcode,
-          name: data.product.product_name || data.product.product_name_pl || "Nieznana nazwa",
-          brand: data.product.brands,
-          image_url: data.product.image_front_small_url,
+          name: p.product_name_pl || p.product_name || "Nieznana nazwa",
+          brand: p.brands,
+          image_url: p.image_front_small_url || p.image_url,
           fromLocal: false,
         });
       } else {
-        setError("Produkt nie znaleziony w Open Food Facts. Mozesz dodac go recznie.");
+        // Not found - show manual entry option
+        setManualEntry(true);
+        setManualName("");
       }
     } catch {
       setError("Blad podczas wyszukiwania");
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchOpenFoodFacts = async (code: string, region: string) => {
+    const res = await fetch(
+      `https://${region}.openfoodfacts.org/api/v0/product/${code}.json`
+    );
+    return res.json();
+  };
+
+  const handleManualAdd = () => {
+    if (!manualName.trim()) return;
+
+    setProduct({
+      barcode,
+      name: manualName.trim(),
+      fromLocal: false,
+    });
+    setManualEntry(false);
   };
 
   const handleAddToInventory = async (action: "add" | "remove") => {
@@ -119,7 +145,6 @@ export default function ScanPage() {
         }
       } else {
         // For remove, we'd need to find the inventory item first
-        // This is simplified - in a real app we'd show a list of matching items
         const inventoryRes = await fetch("/api/inventory");
         const inventory = await inventoryRes.json();
         const item = inventory.find((i: { product_id: number }) => i.product_id === productId);
@@ -151,6 +176,7 @@ export default function ScanPage() {
     setError(null);
     setBarcode("");
     setAdded(false);
+    setManualEntry(false);
   };
 
   return (
@@ -202,6 +228,48 @@ export default function ScanPage() {
             Na razie uzyj trybu recznego lub skanera USB
           </p>
         </div>
+      ) : manualEntry ? (
+        // Manual product entry when not found in Open Food Facts
+        <div className="space-y-4">
+          <div className="p-4 bg-muted rounded-lg">
+            <p className="text-sm text-muted-foreground mb-2">
+              Kod <span className="font-mono font-medium">{barcode}</span> nie znaleziony w bazie Open Food Facts.
+            </p>
+            <p className="text-sm">Wprowadz nazwe produktu recznie:</p>
+          </div>
+
+          <div>
+            <label htmlFor="productName" className="block text-sm font-medium mb-2">
+              Nazwa produktu
+            </label>
+            <input
+              type="text"
+              id="productName"
+              value={manualName}
+              onChange={(e) => setManualName(e.target.value)}
+              placeholder="np. Tymbark Jablko 1L"
+              className="w-full px-4 py-3 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+              autoFocus
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={resetSearch}
+              className="flex-1 py-3 px-4 border rounded-lg font-medium hover:bg-accent transition-colors"
+            >
+              Anuluj
+            </button>
+            <button
+              onClick={handleManualAdd}
+              disabled={!manualName.trim()}
+              className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <Edit3 className="w-5 h-5" />
+              Dodaj
+            </button>
+          </div>
+        </div>
       ) : !product ? (
         <form onSubmit={handleManualSubmit} className="space-y-4">
           <div>
@@ -213,7 +281,7 @@ export default function ScanPage() {
               id="barcode"
               value={barcode}
               onChange={(e) => setBarcode(e.target.value)}
-              placeholder="np. 5901234123457"
+              placeholder="np. 5900497017848"
               className="w-full px-4 py-3 border rounded-lg bg-background focus:outline-none focus:ring-2 focus:ring-primary"
               autoFocus
             />
@@ -225,6 +293,10 @@ export default function ScanPage() {
           >
             {loading ? "Szukam..." : "Szukaj"}
           </button>
+
+          <p className="text-xs text-muted-foreground text-center">
+            Przykladowe kody: 5900497017848 (7UP), 5901234123457
+          </p>
         </form>
       ) : (
         <div className="space-y-4">
