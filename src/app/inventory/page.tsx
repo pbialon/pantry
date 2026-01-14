@@ -31,6 +31,36 @@ export default function InventoryPage() {
     }
   };
 
+  const handleAdd = async (id: number, productId: number) => {
+    setActionLoading(id);
+    try {
+      const res = await fetch("/api/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: productId,
+          quantity: 1,
+          source: "manual",
+        }),
+      });
+      if (res.ok) {
+        // Update local state
+        setInventory((prev) =>
+          prev.map((item) =>
+            item.id === id ? { ...item, quantity: item.quantity + 1 } : item
+          )
+        );
+      } else {
+        fetchInventory();
+      }
+    } catch (error) {
+      console.error("Error adding item:", error);
+      fetchInventory();
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleRemove = async (id: number, quantity: number = 1) => {
     setActionLoading(id);
     try {
@@ -160,6 +190,7 @@ export default function InventoryPage() {
                   <InventoryCard
                     key={item.id}
                     item={item}
+                    onAdd={handleAdd}
                     onRemove={handleRemove}
                     isLoading={actionLoading === item.id}
                   />
@@ -175,10 +206,12 @@ export default function InventoryPage() {
 
 function InventoryCard({
   item,
+  onAdd,
   onRemove,
   isLoading,
 }: {
   item: InventoryWithProduct;
+  onAdd: (id: number, productId: number) => void;
   onRemove: (id: number, quantity?: number) => void;
   isLoading: boolean;
 }) {
@@ -235,6 +268,14 @@ function InventoryCard({
             title="Zmniejsz ilosc o 1"
           >
             <Minus className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => onAdd(item.id, item.product_id)}
+            disabled={isLoading}
+            className="p-2 hover:bg-primary/10 hover:text-primary rounded-lg transition-colors disabled:opacity-50"
+            title="Zwieksz ilosc o 1"
+          >
+            <Plus className="w-4 h-4" />
           </button>
           <button
             onClick={() => {
