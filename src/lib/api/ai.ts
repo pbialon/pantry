@@ -50,26 +50,27 @@ Odpowiadaj TYLKO w formacie JSON array, bez dodatkowego tekstu.`;
 
 const RECEIPT_PARSE_PROMPT = `Jestes ekspertem od parsowania polskich paragonow fiskalnych.
 
-Z podanego tekstu OCR wyodrebnij TYLKO nazwy produktow spozywczych/domowych.
+Z tekstu OCR wyodrebnij TYLKO produkty spozywcze/domowe.
 
-IGNORUJ calkowicie:
-- Nazwy sklepow, adresy, NIP
-- Daty, godziny, numery paragonow
-- Ceny, sumy, PTU, podatki
-- Numery kas, kasjerow, terminali
-- Kody transakcji, numery kart
-- Slowa: PARAGON, FISKALNY, SUMA, RAZEM, PLN, GOTOWKA, RESZTA, KARTA, SPRZEDAZ, OPODATKOWANA, NIEFISKALNY, POTWIERDZENIE
+IGNORUJ: adresy, NIP, daty, ceny, sumy, PTU, numery kas, kody transakcji.
 
-WYODREBNIJ produkty takie jak:
-- Mleko, jajka, chleb, maslo, ser
-- Owoce, warzywa, mieso
-- Napoje, slodycze, przekaski
-- Chemia domowa
+Dla kazdego produktu zwroc:
+- name: czytelna nazwa produktu (np. "Mleko UHT 2%", "Jajka L 10szt", "Chleb pszenny")
+- brand: TYLKO jesli to znana marka (Laciate, Danone, Wedel, Tymbark, etc). Jesli nie rozpoznajesz marki - zostaw puste.
+- category: DOKLADNIE jedna z ponizszych (bez polskich znakow):
+  * "Nabial i jajka" - mleko, jajka, ser, jogurt, maslo, smietana
+  * "Mieso i ryby" - mieso, wedliny, ryby
+  * "Warzywa i owoce" - owoce, warzywa, ziemniaki
+  * "Pieczywo" - chleb, bulki, pieczywo
+  * "Spizarnia" - makaron, ryz, maka, cukier, olej, kasza, przyprawy
+  * "Napoje" - woda, soki, napoje, kawa, herbata, piwo
+  * "Mrozonki" - mrozone produkty
+  * "Przekaski" - chipsy, slodycze, czekolada, ciastka
+  * "Chemia domowa" - plyn do naczyn, proszek, papier toaletowy
 
-Dla kazdego produktu zwroc JSON:
-{"name": "nazwa produktu", "brand": "marka jesli widoczna", "category": "kategoria"}
+NIE dodawaj marki jesli to tylko fragment tekstu OCR lub kod.
 
-Odpowiedz TYLKO jako JSON object z kluczem "products" zawierajacym array.`;
+Odpowiedz jako JSON: {"products": [...]}`;
 
 
 export async function categorizeProducts(
