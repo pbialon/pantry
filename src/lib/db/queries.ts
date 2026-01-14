@@ -171,23 +171,52 @@ export async function getExpiringItems(days: number = 7): Promise<InventoryWithP
 }
 
 export async function addToInventory(input: AddToInventoryInput): Promise<InventoryItem> {
-  // Add to inventory
-  const result = await db.execute({
-    sql: `INSERT INTO inventory (product_id, quantity, quantity_unit, expiry_date, location, purchase_date, purchase_price)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          RETURNING *`,
+  // Check if product already exists in inventory (same product, location, and expiry)
+  const existingResult = await db.execute({
+    sql: `SELECT * FROM inventory
+          WHERE product_id = ?
+          AND (location IS ? OR (location IS NULL AND ? IS NULL))
+          AND (expiry_date IS ? OR (expiry_date IS NULL AND ? IS NULL))
+          LIMIT 1`,
     args: [
       input.product_id,
-      input.quantity,
-      input.quantity_unit || "units",
-      input.expiry_date || null,
       input.location || null,
-      input.purchase_date || null,
-      input.purchase_price || null,
+      input.location || null,
+      input.expiry_date || null,
+      input.expiry_date || null,
     ],
   });
 
-  const item = result.rows[0] as unknown as InventoryItem;
+  const existing = existingResult.rows[0] as unknown as InventoryItem | undefined;
+
+  let item: InventoryItem;
+
+  if (existing) {
+    // Update existing entry - increment quantity
+    const newQuantity = existing.quantity + input.quantity;
+    const updateResult = await db.execute({
+      sql: `UPDATE inventory SET quantity = ?, updated_at = datetime('now') WHERE id = ? RETURNING *`,
+      args: [newQuantity, existing.id],
+    });
+    item = updateResult.rows[0] as unknown as InventoryItem;
+  } else {
+    // Create new entry
+    const result = await db.execute({
+      sql: `INSERT INTO inventory (product_id, quantity, quantity_unit, expiry_date, location, purchase_date, purchase_price)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            RETURNING *`,
+      args: [
+        input.product_id,
+        input.quantity,
+        input.quantity_unit || "units",
+        input.expiry_date || null,
+        input.location || null,
+        input.purchase_date || null,
+        input.purchase_price || null,
+      ],
+    });
+    item = result.rows[0] as unknown as InventoryItem;
+  }
 
   // Record transaction
   await db.execute({
@@ -215,17 +244,23 @@ export async function removeFromInventory(
   const newQuantity = current.quantity - quantity;
 
   if (newQuantity <= 0) {
-    // Remove completely
+    // Record transaction first (before deleting inventory)
     await db.execute({
-      sql: "DELETE FROM inventory WHERE id = ?",
+      sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source)
+            VALUES (?, NULL, 'remove', ?, ?)`,
+      args: [current.product_id, current.quantity, source],
+    });
+
+    // Clear inventory_id references in old transactions
+    await db.execute({
+      sql: "UPDATE transactions SET inventory_id = NULL WHERE inventory_id = ?",
       args: [inventoryId],
     });
 
-    // Record transaction
+    // Now safe to delete inventory item
     await db.execute({
-      sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source)
-            VALUES (?, ?, 'remove', ?, ?)`,
-      args: [current.product_id, inventoryId, current.quantity, source],
+      sql: "DELETE FROM inventory WHERE id = ?",
+      args: [inventoryId],
     });
 
     return { ...current, quantity: 0 };
