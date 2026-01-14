@@ -15,7 +15,7 @@ export interface ParsedProduct {
   name: string;
   brand?: string;
   category: string;
-  quantity?: string;
+  quantity?: string | number;
   quantity_unit?: string;
 }
 
@@ -52,11 +52,17 @@ const RECEIPT_PARSE_PROMPT = `Jestes ekspertem od parsowania polskich paragonow 
 
 Z tekstu OCR wyodrebnij TYLKO produkty spozywcze/domowe.
 
-IGNORUJ: adresy, NIP, daty, ceny, sumy, PTU, numery kas, kody transakcji.
+IGNORUJ: adresy, NIP, daty, ceny, sumy, PTU, numery kas, kody transakcji, numery telefonow.
+
+WAZNE - Nazwy produktow:
+- NIE kopiuj skrotow z paragonu (np. "MLK UHT", "JAJKO NIESPODZ", "CUK DR")
+- Tworz pelne, czytelne nazwy (np. "Mleko UHT 2%", "Jajko niespodzianka", "Cukier")
+- Jesli nie wiesz co to za produkt, pomin go
+- Jesli widzisz ilosc (np. "3 szt", "x2", "2*") - zapisz ja w polu quantity
 
 Dla kazdego produktu zwroc:
-- name: czytelna nazwa produktu (np. "Mleko UHT 2%", "Jajka L 10szt", "Chleb pszenny")
-- brand: TYLKO jesli to znana marka (Laciate, Danone, Wedel, Tymbark, etc). Jesli nie rozpoznajesz marki - zostaw puste.
+- name: PELNA, czytelna nazwa produktu (NIE skroty z paragonu!)
+- brand: TYLKO jesli to znana marka (Laciate, Danone, Wedel, Tymbark, Kinder, Ferrero, Milka, etc). Jesli nie rozpoznajesz marki - zostaw puste.
 - category: DOKLADNIE jedna z ponizszych (bez polskich znakow):
   * "Nabial i jajka" - mleko, jajka, ser, jogurt, maslo, smietana
   * "Mieso i ryby" - mieso, wedliny, ryby
@@ -67,8 +73,14 @@ Dla kazdego produktu zwroc:
   * "Mrozonki" - mrozone produkty
   * "Przekaski" - chipsy, slodycze, czekolada, ciastka
   * "Chemia domowa" - plyn do naczyn, proszek, papier toaletowy
+  * "Inne" - inne produkty
+- quantity: ilosc (domyslnie 1, jesli jest info o wiekszej ilosci - np. "3 szt" = 3)
 
-NIE dodawaj marki jesli to tylko fragment tekstu OCR lub kod.
+Przyklady rozpoznawania:
+- "MLK UHT LACIATE 2%" -> {"name": "Mleko UHT 2%", "brand": "Laciate", "category": "Nabial i jajka", "quantity": 1}
+- "JAJKO NIESPODZ" -> {"name": "Jajko niespodzianka", "brand": "Kinder", "category": "Przekaski", "quantity": 1}
+- "CHLEB PSZENNY 2 szt" -> {"name": "Chleb pszenny", "category": "Pieczywo", "quantity": 2}
+- "CUK DR DIAMANT" -> pomin (niejasne co to)
 
 Odpowiedz jako JSON: {"products": [...]}`;
 

@@ -5,12 +5,17 @@ import Link from "next/link";
 import { ArrowLeft, Plus, Minus, Trash2, Package, RefreshCw } from "lucide-react";
 import type { InventoryWithProduct } from "@/lib/db/schema";
 import { daysUntil, getExpiryStatus, formatDate, translateUnit } from "@/lib/utils";
+import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 export default function InventoryPage() {
   const [inventory, setInventory] = useState<InventoryWithProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("all");
   const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; item: InventoryWithProduct | null }>({
+    isOpen: false,
+    item: null,
+  });
 
   useEffect(() => {
     fetchInventory();
@@ -95,6 +100,21 @@ export default function InventoryPage() {
     }
   };
 
+  const openDeleteModal = (item: InventoryWithProduct) => {
+    setDeleteModal({ isOpen: true, item });
+  };
+
+  const closeDeleteModal = () => {
+    setDeleteModal({ isOpen: false, item: null });
+  };
+
+  const confirmDelete = () => {
+    if (deleteModal.item) {
+      handleRemove(deleteModal.item.id, deleteModal.item.quantity);
+    }
+    closeDeleteModal();
+  };
+
   const groupedInventory = inventory.reduce((acc, item) => {
     const category = item.category?.name || "Inne";
     if (!acc[category]) acc[category] = [];
@@ -110,7 +130,7 @@ export default function InventoryPage() {
 
   if (loading) {
     return (
-      <main className="container mx-auto px-4 py-8 max-w-lg">
+      <main className="container mx-auto px-4 py-6 md:py-8 max-w-5xl">
         <div className="animate-pulse space-y-4">
           <div className="h-8 bg-muted rounded w-1/3"></div>
           <div className="h-12 bg-muted rounded"></div>
@@ -122,7 +142,7 @@ export default function InventoryPage() {
   }
 
   return (
-    <main className="container mx-auto px-4 py-8 max-w-5xl">
+    <main className="container mx-auto px-4 py-6 md:py-8 max-w-5xl">
       <header className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <Link
@@ -146,9 +166,36 @@ export default function InventoryPage() {
         </p>
       </header>
 
+      {/* Mobile: Horizontal scrollable tabs */}
+      <div className="md:hidden mb-4 -mx-4 px-4">
+        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+          {categories.map((cat) => {
+            const count = cat === "all"
+              ? inventory.length
+              : groupedInventory[cat]?.length || 0;
+            return (
+              <button
+                key={cat}
+                onClick={() => setFilter(cat)}
+                className={`flex-shrink-0 px-3 py-2 rounded-full text-sm font-medium transition-colors ${
+                  filter === cat
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted hover:bg-muted/80"
+                }`}
+              >
+                {cat === "all" ? "Wszystkie" : cat}
+                <span className={`ml-1.5 ${filter === cat ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="flex gap-6">
-        {/* Sidebar - category filter */}
-        <aside className="w-48 flex-shrink-0">
+        {/* Desktop: Sidebar - category filter */}
+        <aside className="hidden md:block w-48 flex-shrink-0">
           <nav className="sticky top-8 space-y-1">
             {categories.map((cat) => {
               const count = cat === "all"
@@ -208,6 +255,7 @@ export default function InventoryPage() {
                     item={item}
                     onAdd={handleAdd}
                     onRemove={handleRemove}
+                    onDelete={openDeleteModal}
                     isLoading={actionLoading === item.id}
                   />
                 ))}
@@ -218,6 +266,17 @@ export default function InventoryPage() {
       )}
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={deleteModal.isOpen}
+        title="Usunac produkt?"
+        message={deleteModal.item ? `Czy na pewno chcesz usunac "${deleteModal.item.product.name}" z inwentarza?` : ""}
+        confirmText="Usun"
+        cancelText="Anuluj"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={closeDeleteModal}
+      />
     </main>
   );
 }
@@ -226,11 +285,13 @@ function InventoryCard({
   item,
   onAdd,
   onRemove,
+  onDelete,
   isLoading,
 }: {
   item: InventoryWithProduct;
   onAdd: (id: number, productId: number) => void;
   onRemove: (id: number, quantity?: number) => void;
+  onDelete: (item: InventoryWithProduct) => void;
   isLoading: boolean;
 }) {
   const expiryDays = item.expiry_date ? daysUntil(item.expiry_date) : null;
@@ -278,34 +339,36 @@ function InventoryCard({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5 md:gap-1">
           <button
-            onClick={() => onRemove(item.id, 1)}
+            onClick={() => {
+              if (item.quantity <= 1) {
+                onDelete(item);
+              } else {
+                onRemove(item.id, 1);
+              }
+            }}
             disabled={isLoading}
-            className="p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+            className="p-2.5 md:p-2 hover:bg-muted rounded-lg transition-colors disabled:opacity-50 active:bg-muted"
             title="Zmniejsz ilosc o 1"
           >
-            <Minus className="w-4 h-4" />
+            <Minus className="w-5 h-5 md:w-4 md:h-4" />
           </button>
           <button
             onClick={() => onAdd(item.id, item.product_id)}
             disabled={isLoading}
-            className="p-2 hover:bg-primary/10 hover:text-primary rounded-lg transition-colors disabled:opacity-50"
+            className="p-2.5 md:p-2 hover:bg-primary/10 hover:text-primary rounded-lg transition-colors disabled:opacity-50 active:bg-primary/10"
             title="Zwieksz ilosc o 1"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-5 h-5 md:w-4 md:h-4" />
           </button>
           <button
-            onClick={() => {
-              if (confirm(`Usunac "${item.product.name}" z inwentarza?`)) {
-                onRemove(item.id, item.quantity);
-              }
-            }}
+            onClick={() => onDelete(item)}
             disabled={isLoading}
-            className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors disabled:opacity-50"
+            className="p-2.5 md:p-2 hover:bg-destructive/10 hover:text-destructive rounded-lg transition-colors disabled:opacity-50 active:bg-destructive/10"
             title="Usun calkowicie"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-5 h-5 md:w-4 md:h-4" />
           </button>
         </div>
       </div>

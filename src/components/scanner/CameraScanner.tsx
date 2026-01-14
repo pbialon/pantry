@@ -23,6 +23,20 @@ export default function CameraScanner({ onScan, onError }: CameraScannerProps) {
     const reader = new BrowserMultiFormatReader();
     readerRef.current = reader;
 
+    // Check if MediaDevices API is available (requires HTTPS)
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      const isHttps = typeof window !== "undefined" && window.location.protocol === "https:";
+      const isLocalhost = typeof window !== "undefined" &&
+        (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+
+      if (!isHttps && !isLocalhost) {
+        setError("Kamera wymaga polaczenia HTTPS. Otworz strone przez https://");
+      } else {
+        setError("Twoja przegladarka nie wspiera dostepu do kamery");
+      }
+      return;
+    }
+
     // Get available video devices
     navigator.mediaDevices
       .enumerateDevices()

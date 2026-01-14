@@ -9,14 +9,31 @@ import {
   FileText,
   CheckCircle,
   AlertCircle,
+  Pencil,
+  X,
+  Check,
 } from "lucide-react";
 
 interface ParsedProduct {
   name: string;
   brand?: string;
   category?: string;
+  quantity: number;
   selected: boolean;
 }
+
+const CATEGORIES = [
+  "Nabial i jajka",
+  "Mieso i ryby",
+  "Warzywa i owoce",
+  "Pieczywo",
+  "Spizarnia",
+  "Napoje",
+  "Mrozonki",
+  "Przekaski",
+  "Chemia domowa",
+  "Inne",
+];
 
 type Step = "upload" | "processing" | "select" | "done";
 
@@ -72,8 +89,9 @@ export default function ReceiptPage() {
       }
 
       setProducts(
-        data.products.map((p: { name: string; brand?: string; category?: string }) => ({
+        data.products.map((p: { name: string; brand?: string; category?: string; quantity?: number }) => ({
           ...p,
+          quantity: typeof p.quantity === "number" ? p.quantity : 1,
           selected: true,
         }))
       );
@@ -86,10 +104,52 @@ export default function ReceiptPage() {
     }
   };
 
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<{ name: string; brand: string; category: string; quantity: number }>({
+    name: "",
+    brand: "",
+    category: "",
+    quantity: 1,
+  });
+
   const toggleProduct = (index: number) => {
+    if (editingIndex !== null) return; // Don't toggle while editing
     setProducts((prev) =>
       prev.map((p, i) => (i === index ? { ...p, selected: !p.selected } : p))
     );
+  };
+
+  const startEditing = (index: number) => {
+    const product = products[index];
+    setEditForm({
+      name: product.name,
+      brand: product.brand || "",
+      category: product.category || "Inne",
+      quantity: product.quantity,
+    });
+    setEditingIndex(index);
+  };
+
+  const cancelEditing = () => {
+    setEditingIndex(null);
+  };
+
+  const saveEditing = () => {
+    if (editingIndex === null) return;
+    setProducts((prev) =>
+      prev.map((p, i) =>
+        i === editingIndex
+          ? {
+              ...p,
+              name: editForm.name,
+              brand: editForm.brand || undefined,
+              category: editForm.category,
+              quantity: editForm.quantity,
+            }
+          : p
+      )
+    );
+    setEditingIndex(null);
   };
 
   const handleImport = async () => {
@@ -123,12 +183,12 @@ export default function ReceiptPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             product_id: product.id,
-            quantity: 1,
+            quantity: item.quantity || 1,
             source: "receipt",
           }),
         });
 
-        if (inventoryRes.ok) imported++;
+        if (inventoryRes.ok) imported += item.quantity || 1;
       }
 
       setSuccessCount(imported);
@@ -254,36 +314,123 @@ export default function ReceiptPage() {
       {step === "select" && (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Znaleziono {products.length} produktow. Odznacz te, ktorych nie chcesz dodac.
+            Znaleziono {products.length} produktow. Kliknij aby odznaczyc, lub ikone olowka aby edytowac.
           </p>
 
           <div className="space-y-2">
             {products.map((product, index) => (
-              <div
-                key={index}
-                onClick={() => toggleProduct(index)}
-                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-                  product.selected
-                    ? "bg-primary/5 border-primary"
-                    : "bg-card opacity-50"
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <div>
-                    {product.selected ? (
-                      <CheckCircle className="w-5 h-5 text-primary" />
-                    ) : (
-                      <div className="w-5 h-5 rounded-full border-2" />
-                    )}
+              <div key={index}>
+                {editingIndex === index ? (
+                  // Edit mode
+                  <div className="p-4 rounded-lg border border-primary bg-primary/5 space-y-3">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Nazwa</label>
+                      <input
+                        type="text"
+                        value={editForm.name}
+                        onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 border rounded-lg bg-background text-sm"
+                        placeholder="Nazwa produktu"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground">Marka (opcjonalnie)</label>
+                        <input
+                          type="text"
+                          value={editForm.brand}
+                          onChange={(e) => setEditForm({ ...editForm, brand: e.target.value })}
+                          className="w-full mt-1 px-3 py-2 border rounded-lg bg-background text-sm"
+                          placeholder="Marka"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium text-muted-foreground">Ilosc</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={editForm.quantity}
+                          onChange={(e) => setEditForm({ ...editForm, quantity: parseInt(e.target.value) || 1 })}
+                          className="w-full mt-1 px-3 py-2 border rounded-lg bg-background text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground">Kategoria</label>
+                      <select
+                        value={editForm.category}
+                        onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 border rounded-lg bg-background text-sm"
+                      >
+                        {CATEGORIES.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={cancelEditing}
+                        className="flex-1 py-2 px-3 border rounded-lg text-sm hover:bg-accent transition-colors flex items-center justify-center gap-1"
+                      >
+                        <X className="w-4 h-4" />
+                        Anuluj
+                      </button>
+                      <button
+                        onClick={saveEditing}
+                        className="flex-1 py-2 px-3 bg-primary text-primary-foreground rounded-lg text-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Check className="w-4 h-4" />
+                        Zapisz
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium">{product.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {product.category}
-                      {product.brand && ` • ${product.brand}`}
-                    </p>
+                ) : (
+                  // Display mode
+                  <div
+                    onClick={() => toggleProduct(index)}
+                    className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                      product.selected
+                        ? "bg-primary/5 border-primary"
+                        : "bg-card opacity-50"
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div>
+                        {product.selected ? (
+                          <CheckCircle className="w-5 h-5 text-primary" />
+                        ) : (
+                          <div className="w-5 h-5 rounded-full border-2" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium">
+                          {product.name}
+                          {product.quantity > 1 && (
+                            <span className="ml-2 text-sm font-normal text-muted-foreground">
+                              x{product.quantity}
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {product.category}
+                          {product.brand && ` • ${product.brand}`}
+                        </p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditing(index);
+                        }}
+                        className="p-2 hover:bg-muted rounded-lg transition-colors"
+                        title="Edytuj"
+                      >
+                        <Pencil className="w-4 h-4 text-muted-foreground" />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>
@@ -304,12 +451,12 @@ export default function ReceiptPage() {
             </button>
             <button
               onClick={handleImport}
-              disabled={loading || products.filter((p) => p.selected).length === 0}
+              disabled={loading || products.filter((p) => p.selected).length === 0 || editingIndex !== null}
               className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
             >
               {loading
                 ? "Importowanie..."
-                : `Dodaj (${products.filter((p) => p.selected).length})`}
+                : `Dodaj (${products.filter((p) => p.selected).reduce((sum, p) => sum + p.quantity, 0)})`}
             </button>
           </div>
         </div>
