@@ -18,6 +18,7 @@ export default function ImportPage() {
   const [items, setItems] = useState<CategorizedItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successCount, setSuccessCount] = useState(0);
 
   const handleCategorize = async () => {
     if (!input.trim()) return;
@@ -34,7 +35,7 @@ export default function ImportPage() {
 
     const parsed: CategorizedItem[] = lines.map((line) => ({
       original: line,
-      name: line.replace(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?\.?/gi, "").trim(),
+      name: line.replace(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?\.?/gi, "").trim() || line,
       brand: null,
       category: "Spizarnia", // Default category
       quantity: line.match(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?/i)?.[0] || null,
@@ -58,40 +59,57 @@ export default function ImportPage() {
     if (selectedItems.length === 0) return;
 
     setLoading(true);
+    setError(null);
+    let imported = 0;
 
     try {
       for (const item of selectedItems) {
-        // Create product
+        // Create product - don't send null values, omit them instead
+        const productData: { name: string; brand?: string } = {
+          name: item.name,
+        };
+        if (item.brand) {
+          productData.brand = item.brand;
+        }
+
         const productRes = await fetch("/api/products", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(productData),
+        });
+
+        if (!productRes.ok) {
+          const errData = await productRes.json();
+          console.error("Product creation failed:", errData);
+          continue;
+        }
+
+        const product = await productRes.json();
+
+        // Add to inventory
+        const inventoryRes = await fetch("/api/inventory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            name: item.name,
-            brand: item.brand,
+            product_id: product.id,
+            quantity: 1,
+            source: "import",
           }),
         });
 
-        if (productRes.ok) {
-          const product = await productRes.json();
-
-          // Add to inventory
-          await fetch("/api/inventory", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              product_id: product.id,
-              quantity: 1,
-              source: "import",
-            }),
-          });
+        if (inventoryRes.ok) {
+          imported++;
+        } else {
+          const errData = await inventoryRes.json();
+          console.error("Inventory add failed:", errData);
         }
       }
 
+      setSuccessCount(imported);
       setInput("");
       setItems([]);
-      setError(null);
-      alert(`Zaimportowano ${selectedItems.length} produktow`);
-    } catch {
+    } catch (err) {
+      console.error("Import error:", err);
       setError("Blad podczas importu");
     } finally {
       setLoading(false);
@@ -113,6 +131,16 @@ export default function ImportPage() {
           Wklej liste produktow z zamowienia online
         </p>
       </header>
+
+      {successCount > 0 && (
+        <div className="mb-4 p-4 bg-primary/10 text-primary rounded-lg flex items-center gap-2">
+          <CheckCircle className="w-5 h-5" />
+          Zaimportowano {successCount} produktow!
+          <Link href="/inventory" className="ml-auto underline">
+            Zobacz inwentarz
+          </Link>
+        </div>
+      )}
 
       {items.length === 0 ? (
         <div className="space-y-4">

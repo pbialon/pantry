@@ -2,23 +2,48 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Camera, Keyboard } from "lucide-react";
+import { ArrowLeft, Camera, Keyboard, Plus, CheckCircle } from "lucide-react";
+
+interface FoundProduct {
+  barcode: string;
+  name: string;
+  brand?: string;
+  image_url?: string;
+  fromLocal: boolean;
+  localProductId?: number;
+}
 
 export default function ScanPage() {
-  const [mode, setMode] = useState<"camera" | "manual">("camera");
+  const [mode, setMode] = useState<"camera" | "manual">("manual");
   const [barcode, setBarcode] = useState("");
-  const [result, setResult] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [product, setProduct] = useState<FoundProduct | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState(false);
 
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!barcode.trim()) return;
 
+    setLoading(true);
+    setError(null);
+    setProduct(null);
+    setAdded(false);
+
     try {
       // First check if product exists locally
       const localRes = await fetch(`/api/products?barcode=${barcode}`);
       if (localRes.ok) {
-        const product = await localRes.json();
-        setResult(`Znaleziono: ${product.name}`);
+        const localProduct = await localRes.json();
+        setProduct({
+          barcode,
+          name: localProduct.name,
+          brand: localProduct.brand,
+          image_url: localProduct.image_url,
+          fromLocal: true,
+          localProductId: localProduct.id,
+        });
+        setLoading(false);
         return;
       }
 
@@ -29,13 +54,103 @@ export default function ScanPage() {
       const data = await res.json();
 
       if (data.status === 1) {
-        setResult(`Open Food Facts: ${data.product.product_name || "Nieznana nazwa"}`);
+        setProduct({
+          barcode,
+          name: data.product.product_name || data.product.product_name_pl || "Nieznana nazwa",
+          brand: data.product.brands,
+          image_url: data.product.image_front_small_url,
+          fromLocal: false,
+        });
       } else {
-        setResult("Produkt nie znaleziony");
+        setError("Produkt nie znaleziony w Open Food Facts. Mozesz dodac go recznie.");
       }
     } catch {
-      setResult("Blad podczas wyszukiwania");
+      setError("Blad podczas wyszukiwania");
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleAddToInventory = async (action: "add" | "remove") => {
+    if (!product) return;
+
+    setLoading(true);
+
+    try {
+      let productId = product.localProductId;
+
+      // If product doesn't exist locally, create it first
+      if (!productId) {
+        const productData: { name: string; barcode: string; brand?: string; image_url?: string } = {
+          name: product.name,
+          barcode: product.barcode,
+        };
+        if (product.brand) productData.brand = product.brand;
+        if (product.image_url) productData.image_url = product.image_url;
+
+        const createRes = await fetch("/api/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(productData),
+        });
+
+        if (!createRes.ok) {
+          throw new Error("Nie udalo sie utworzyc produktu");
+        }
+
+        const newProduct = await createRes.json();
+        productId = newProduct.id;
+      }
+
+      if (action === "add") {
+        // Add to inventory
+        const inventoryRes = await fetch("/api/inventory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            product_id: productId,
+            quantity: 1,
+            source: "barcode",
+          }),
+        });
+
+        if (!inventoryRes.ok) {
+          throw new Error("Nie udalo sie dodac do inwentarza");
+        }
+      } else {
+        // For remove, we'd need to find the inventory item first
+        // This is simplified - in a real app we'd show a list of matching items
+        const inventoryRes = await fetch("/api/inventory");
+        const inventory = await inventoryRes.json();
+        const item = inventory.find((i: { product_id: number }) => i.product_id === productId);
+
+        if (item) {
+          await fetch(`/api/inventory?id=${item.id}&quantity=1`, {
+            method: "DELETE",
+          });
+        }
+      }
+
+      setAdded(true);
+      setBarcode("");
+
+      // Reset after 2 seconds
+      setTimeout(() => {
+        setProduct(null);
+        setAdded(false);
+      }, 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Blad podczas dodawania");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetSearch = () => {
+    setProduct(null);
+    setError(null);
+    setBarcode("");
+    setAdded(false);
   };
 
   return (
@@ -87,7 +202,7 @@ export default function ScanPage() {
             Na razie uzyj trybu recznego lub skanera USB
           </p>
         </div>
-      ) : (
+      ) : !product ? (
         <form onSubmit={handleManualSubmit} className="space-y-4">
           <div>
             <label htmlFor="barcode" className="block text-sm font-medium mb-2">
@@ -105,16 +220,78 @@ export default function ScanPage() {
           </div>
           <button
             type="submit"
-            className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+            disabled={loading || !barcode.trim()}
+            className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
           >
-            Szukaj
+            {loading ? "Szukam..." : "Szukaj"}
           </button>
         </form>
+      ) : (
+        <div className="space-y-4">
+          {/* Product card */}
+          <div className="bg-card rounded-lg border p-4">
+            <div className="flex gap-4">
+              {product.image_url && (
+                <img
+                  src={product.image_url}
+                  alt={product.name}
+                  className="w-20 h-20 object-contain rounded"
+                />
+              )}
+              <div className="flex-1">
+                <h3 className="font-medium">{product.name}</h3>
+                {product.brand && (
+                  <p className="text-sm text-muted-foreground">{product.brand}</p>
+                )}
+                <p className="text-xs text-muted-foreground mt-1">
+                  {product.barcode}
+                </p>
+                {product.fromLocal && (
+                  <span className="inline-block mt-2 text-xs bg-primary/10 text-primary px-2 py-1 rounded">
+                    W bazie lokalnej
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {added ? (
+            <div className="p-4 bg-primary/10 text-primary rounded-lg flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              Dodano do inwentarza!
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleAddToInventory("remove")}
+                disabled={loading}
+                className="flex-1 py-3 px-4 border rounded-lg font-medium hover:bg-accent transition-colors disabled:opacity-50"
+              >
+                Wyrzuc (-1)
+              </button>
+              <button
+                onClick={() => handleAddToInventory("add")}
+                disabled={loading}
+                className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                <Plus className="w-5 h-5" />
+                Dodaj (+1)
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={resetSearch}
+            className="w-full py-2 text-sm text-muted-foreground hover:text-foreground"
+          >
+            Skanuj kolejny
+          </button>
+        </div>
       )}
 
-      {result && (
-        <div className="mt-6 p-4 bg-card rounded-lg border">
-          <p className="font-medium">{result}</p>
+      {error && (
+        <div className="mt-4 p-4 bg-destructive/10 text-destructive rounded-lg">
+          {error}
         </div>
       )}
 
