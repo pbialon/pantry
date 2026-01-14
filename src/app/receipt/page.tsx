@@ -162,11 +162,14 @@ export default function ReceiptPage() {
 
     try {
       for (const item of selectedItems) {
-        const productData: { name: string; brand?: string } = {
+        const productData: { name: string; brand?: string; category?: string } = {
           name: item.name,
         };
         if (item.brand) {
           productData.brand = item.brand;
+        }
+        if (item.category) {
+          productData.category = item.category;
         }
 
         const productRes = await fetch("/api/products", {

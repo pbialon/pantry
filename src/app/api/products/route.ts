@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProducts, createProduct, getProductByBarcode } from "@/lib/db/queries";
+import { getProducts, createProduct, getProductByBarcode, getCategoryByName } from "@/lib/db/queries";
 import { createProductInput } from "@/lib/db/schema";
 
 export async function GET(request: NextRequest) {
@@ -29,6 +29,16 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+
+    // If category name is provided, look up category_id
+    if (body.category && !body.category_id) {
+      const category = await getCategoryByName(body.category);
+      if (category) {
+        body.category_id = category.id;
+      }
+      delete body.category; // Remove category name from body
+    }
+
     const parsed = createProductInput.safeParse(body);
 
     if (!parsed.success) {

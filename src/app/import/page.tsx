@@ -96,12 +96,15 @@ export default function ImportPage() {
 
     try {
       for (const item of selectedItems) {
-        // Create product - don't send null values, omit them instead
-        const productData: { name: string; brand?: string } = {
+        // Create product - include category for lookup
+        const productData: { name: string; brand?: string; category?: string } = {
           name: item.name,
         };
         if (item.brand) {
           productData.brand = item.brand;
+        }
+        if (item.category) {
+          productData.category = item.category;
         }
 
         const productRes = await fetch("/api/products", {

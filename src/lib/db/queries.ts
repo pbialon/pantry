@@ -23,6 +23,14 @@ export async function getCategoryById(id: number): Promise<Category | null> {
   return (result.rows[0] as unknown as Category) || null;
 }
 
+export async function getCategoryByName(name: string): Promise<Category | null> {
+  const result = await db.execute({
+    sql: "SELECT * FROM categories WHERE name = ? OR name LIKE ?",
+    args: [name, `%${name}%`],
+  });
+  return (result.rows[0] as unknown as Category) || null;
+}
+
 // Products
 export async function getProducts(): Promise<Product[]> {
   const result = await db.execute("SELECT * FROM products ORDER BY name");
