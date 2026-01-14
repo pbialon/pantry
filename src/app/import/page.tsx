@@ -10,6 +10,7 @@ interface CategorizedItem {
   brand: string | null;
   category: string;
   quantity: string | null;
+  quantity_unit: string | null;
   selected: boolean;
 }
 
@@ -26,24 +27,55 @@ export default function ImportPage() {
     setLoading(true);
     setError(null);
 
-    // For now, do simple parsing without AI
-    // AI integration will be added in Phase 3
     const lines = input
       .split("\n")
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    const parsed: CategorizedItem[] = lines.map((line) => ({
-      original: line,
-      name: line.replace(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?\.?/gi, "").trim() || line,
-      brand: null,
-      category: "Spizarnia", // Default category
-      quantity: line.match(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?/i)?.[0] || null,
-      selected: true,
-    }));
+    try {
+      const res = await fetch("/api/categorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ products: lines }),
+      });
 
-    setItems(parsed);
-    setLoading(false);
+      if (!res.ok) {
+        throw new Error("Blad kategoryzacji");
+      }
+
+      const categorized = await res.json();
+
+      const parsed: CategorizedItem[] = lines.map((line, index) => {
+        const cat = categorized[index] || {};
+        return {
+          original: line,
+          name: cat.name || line,
+          brand: cat.brand || null,
+          category: cat.category || "Spizarnia",
+          quantity: cat.quantity || null,
+          quantity_unit: cat.quantity_unit || null,
+          selected: true,
+        };
+      });
+
+      setItems(parsed);
+    } catch (err) {
+      console.error("Categorization error:", err);
+      // Fallback to simple parsing if AI fails
+      const parsed: CategorizedItem[] = lines.map((line) => ({
+        original: line,
+        name: line.replace(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?\.?/gi, "").trim() || line,
+        brand: null,
+        category: "Spizarnia",
+        quantity: line.match(/\d+[.,]?\d*/)?.[0] || null,
+        quantity_unit: line.match(/(szt|kg|g|l|ml)/i)?.[0] || null,
+        selected: true,
+      }));
+      setItems(parsed);
+      setError("AI niedostepne - uzyto prostego parsowania");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const toggleItem = (index: number) => {
@@ -168,7 +200,7 @@ export default function ImportPage() {
           </button>
 
           <p className="text-sm text-muted-foreground text-center">
-            AI kategoryzacja bedzie dostepna po integracji z OpenAI (Faza 3)
+            AI automatycznie skategoryzuje produkty (wymaga OPENAI_API_KEY)
           </p>
         </div>
       ) : (
@@ -196,7 +228,8 @@ export default function ImportPage() {
                     <p className="font-medium">{item.name}</p>
                     <p className="text-sm text-muted-foreground">
                       {item.category}
-                      {item.quantity && ` • ${item.quantity}`}
+                      {item.quantity && ` • ${item.quantity}${item.quantity_unit || ""}`}
+                      {item.brand && ` • ${item.brand}`}
                     </p>
                     <p className="text-xs text-muted-foreground mt-1">
                       z: {item.original}
