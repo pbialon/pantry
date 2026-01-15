@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+import { SessionProvider } from "@/components/SessionProvider";
 
 const inter = Inter({ subsets: ["latin", "latin-ext"] });
 
@@ -13,6 +14,10 @@ export const metadata: Metadata = {
     capable: true,
     statusBarStyle: "default",
     title: "Pantry",
+  },
+  icons: {
+    icon: "/icons/icon.svg",
+    apple: "/icons/icon.svg",
   },
 };
 
@@ -31,10 +36,12 @@ export default function RootLayout({
   return (
     <html lang="pl">
       <body className={inter.className}>
-        <ServiceWorkerRegister />
-        <div className="min-h-screen bg-background">
-          {children}
-        </div>
+        <SessionProvider>
+          <ServiceWorkerRegister />
+          <div className="min-h-screen bg-background">
+            {children}
+          </div>
+        </SessionProvider>
       </body>
     </html>
   );

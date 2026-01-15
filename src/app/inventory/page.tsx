@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Minus, Trash2, Package, RefreshCw } from "lucide-react";
 import type { InventoryWithProduct } from "@/lib/db/schema";
-import { daysUntil, getExpiryStatus, formatDate, translateUnit } from "@/lib/utils";
+import { daysUntil, getExpiryStatus, formatDate } from "@/lib/utils";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
 
 export default function InventoryPage() {
@@ -319,7 +319,7 @@ function InventoryCard({
           )}
           <div className="flex items-center gap-2 mt-2 text-sm">
             <span className="font-medium">
-              {item.quantity} {translateUnit(item.quantity_unit, item.quantity)}
+              {item.quantity} szt.
             </span>
             {item.location && (
               <span className="text-muted-foreground">

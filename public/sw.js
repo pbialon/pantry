@@ -1,10 +1,11 @@
-const CACHE_NAME = 'pantry-v1';
+const CACHE_NAME = 'pantry-v2';
 const STATIC_ASSETS = [
   '/',
   '/scan',
   '/inventory',
   '/import',
   '/receipt',
+  '/history',
   '/manifest.json',
   '/icons/icon.svg',
 ];

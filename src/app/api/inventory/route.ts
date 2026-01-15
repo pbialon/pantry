@@ -1,19 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
 import { getInventory, addToInventory, removeFromInventory, getExpiringItems } from "@/lib/db/queries";
 import { addToInventoryInput } from "@/lib/db/schema";
 
 export async function GET(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = parseInt(session.user.id);
+
     const { searchParams } = new URL(request.url);
     const expiring = searchParams.get("expiring");
 
     if (expiring) {
       const days = parseInt(expiring) || 7;
-      const items = await getExpiringItems(days);
+      const items = await getExpiringItems(days, userId);
       return NextResponse.json(items);
     }
 
-    const inventory = await getInventory();
+    const inventory = await getInventory(userId);
     return NextResponse.json(inventory);
   } catch (error) {
     console.error("Error fetching inventory:", error);
@@ -26,6 +33,12 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = parseInt(session.user.id);
+
     const body = await request.json();
     const parsed = addToInventoryInput.safeParse(body);
 
@@ -36,7 +49,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const item = await addToInventory(parsed.data);
+    const item = await addToInventory(parsed.data, userId);
     return NextResponse.json(item, { status: 201 });
   } catch (error) {
     console.error("Error adding to inventory:", error);
@@ -49,6 +62,12 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const session = await auth();
+    if (!session?.user?.id) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const userId = parseInt(session.user.id);
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get("id");
     const quantity = searchParams.get("quantity");
@@ -60,7 +79,8 @@ export async function DELETE(request: NextRequest) {
     const item = await removeFromInventory(
       parseInt(id),
       quantity ? parseFloat(quantity) : 1,
-      "manual"
+      "manual",
+      userId
     );
 
     if (!item) {

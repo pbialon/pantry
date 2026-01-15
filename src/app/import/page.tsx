@@ -1,25 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import { ArrowLeft, Sparkles, CheckCircle, AlertCircle } from "lucide-react";
+import { ArrowLeft, Sparkles, CheckCircle, AlertCircle, Pencil, X, Check } from "lucide-react";
+
+interface Category {
+  id: number;
+  name: string;
+  icon: string | null;
+}
 
 interface CategorizedItem {
   original: string;
   name: string;
   brand: string | null;
   category: string;
-  quantity: string | null;
-  quantity_unit: string | null;
+  quantity: number;
   selected: boolean;
+  editing: boolean;
 }
+
 
 export default function ImportPage() {
   const [input, setInput] = useState("");
   const [items, setItems] = useState<CategorizedItem[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/categories")
+      .then((res) => res.ok ? res.json() : [])
+      .then(setCategories)
+      .catch(() => setCategories([]));
+  }, []);
 
   const handleCategorize = async () => {
     if (!input.trim()) return;
@@ -52,9 +67,9 @@ export default function ImportPage() {
           name: cat.name || line,
           brand: cat.brand || null,
           category: cat.category || "Spizarnia",
-          quantity: cat.quantity || null,
-          quantity_unit: cat.quantity_unit || null,
+          quantity: 1,
           selected: true,
+          editing: false,
         };
       });
 
@@ -64,12 +79,12 @@ export default function ImportPage() {
       // Fallback to simple parsing if AI fails
       const parsed: CategorizedItem[] = lines.map((line) => ({
         original: line,
-        name: line.replace(/\d+[.,]?\d*\s*(szt|kg|g|l|ml)?\.?/gi, "").trim() || line,
+        name: line,
         brand: null,
         category: "Spizarnia",
-        quantity: line.match(/\d+[.,]?\d*/)?.[0] || null,
-        quantity_unit: line.match(/(szt|kg|g|l|ml)/i)?.[0] || null,
+        quantity: 1,
         selected: true,
+        editing: false,
       }));
       setItems(parsed);
       setError("AI niedostepne - uzyto prostego parsowania");
@@ -79,9 +94,43 @@ export default function ImportPage() {
   };
 
   const toggleItem = (index: number) => {
+    if (items[index].editing) return;
     setItems((prev) =>
       prev.map((item, i) =>
         i === index ? { ...item, selected: !item.selected } : item
+      )
+    );
+  };
+
+  const startEditing = (index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, editing: true } : { ...item, editing: false }
+      )
+    );
+  };
+
+  const cancelEditing = (index: number) => {
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, editing: false } : item
+      )
+    );
+  };
+
+  const updateItem = (index: number, field: keyof CategorizedItem, value: string | number | null) => {
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, [field]: value } : item
+      )
+    );
+  };
+
+  const saveEditing = (index: number) => {
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i === index ? { ...item, editing: false } : item
       )
     );
   };
@@ -127,7 +176,7 @@ export default function ImportPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             product_id: product.id,
-            quantity: 1,
+            quantity: item.quantity,
             source: "import",
           }),
         });
@@ -213,32 +262,114 @@ export default function ImportPage() {
               <div
                 key={index}
                 onClick={() => toggleItem(index)}
-                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
+                className={`p-4 rounded-lg border transition-colors ${
                   item.selected
                     ? "bg-primary/5 border-primary"
                     : "bg-card opacity-50"
-                }`}
+                } ${item.editing ? "cursor-default" : "cursor-pointer"}`}
               >
-                <div className="flex items-start gap-3">
-                  <div className="mt-1">
-                    {item.selected ? (
-                      <CheckCircle className="w-5 h-5 text-primary" />
-                    ) : (
-                      <div className="w-5 h-5 rounded-full border-2" />
-                    )}
+                {item.editing ? (
+                  // Edit mode
+                  <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Nazwa</label>
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => updateItem(index, "name", e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Marka</label>
+                      <input
+                        type="text"
+                        value={item.brand || ""}
+                        onChange={(e) => updateItem(index, "brand", e.target.value || null)}
+                        placeholder="(opcjonalnie)"
+                        className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Kategoria</label>
+                      <select
+                        value={item.category}
+                        onChange={(e) => updateItem(index, "category", e.target.value)}
+                        className="w-full px-3 py-2 border rounded-lg bg-background text-sm appearance-none"
+                        style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+                      >
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.name}>
+                            {cat.name}
+                          </option>
+                        ))}
+                        {!categories.find(c => c.name === item.category) && (
+                          <option value={item.category}>{item.category}</option>
+                        )}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Ilosc (szt.)</label>
+                      <input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => updateItem(index, "quantity", parseInt(e.target.value) || 1)}
+                        min="1"
+                        step="1"
+                        className="w-full px-3 py-2 border rounded-lg bg-background text-sm"
+                      />
+                    </div>
+
+                    <div className="flex gap-2 pt-2">
+                      <button
+                        onClick={() => cancelEditing(index)}
+                        className="flex-1 py-2 px-3 border rounded-lg text-sm hover:bg-accent transition-colors flex items-center justify-center gap-1"
+                      >
+                        <X className="w-4 h-4" />
+                        Anuluj
+                      </button>
+                      <button
+                        onClick={() => saveEditing(index)}
+                        className="flex-1 py-2 px-3 bg-primary text-primary-foreground rounded-lg text-sm hover:bg-primary/90 transition-colors flex items-center justify-center gap-1"
+                      >
+                        <Check className="w-4 h-4" />
+                        Zapisz
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="font-medium">{item.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {item.category}
-                      {item.quantity && ` • ${item.quantity}${item.quantity_unit || ""}`}
-                      {item.brand && ` • ${item.brand}`}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      z: {item.original}
-                    </p>
+                ) : (
+                  // View mode
+                  <div className="flex items-start gap-3">
+                    <div className="mt-1">
+                      {item.selected ? (
+                        <CheckCircle className="w-5 h-5 text-primary" />
+                      ) : (
+                        <div className="w-5 h-5 rounded-full border-2" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium">{item.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {item.category}
+                        {item.quantity > 1 && ` • ${item.quantity} szt.`}
+                        {item.brand && ` • ${item.brand}`}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        z: {item.original}
+                      </p>
+                    </div>
+                    <button
+                      onClick={(e) => startEditing(index, e)}
+                      className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded-lg transition-colors"
+                      title="Edytuj"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
                   </div>
-                </div>
+                )}
               </div>
             ))}
           </div>

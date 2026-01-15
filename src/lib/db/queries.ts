@@ -9,7 +9,7 @@ import type {
   AddToInventoryInput,
 } from "./schema";
 
-// Categories
+// Categories (shared across all users)
 export async function getCategories(): Promise<Category[]> {
   const result = await db.execute("SELECT * FROM categories ORDER BY name");
   return result.rows as unknown as Category[];
@@ -31,32 +31,35 @@ export async function getCategoryByName(name: string): Promise<Category | null> 
   return (result.rows[0] as unknown as Category) || null;
 }
 
-// Products
-export async function getProducts(): Promise<Product[]> {
-  const result = await db.execute("SELECT * FROM products ORDER BY name");
+// Products (user-scoped)
+export async function getProducts(userId: number): Promise<Product[]> {
+  const result = await db.execute({
+    sql: "SELECT * FROM products WHERE user_id = ? ORDER BY name",
+    args: [userId],
+  });
   return result.rows as unknown as Product[];
 }
 
-export async function getProductById(id: number): Promise<Product | null> {
+export async function getProductById(id: number, userId: number): Promise<Product | null> {
   const result = await db.execute({
-    sql: "SELECT * FROM products WHERE id = ?",
-    args: [id],
+    sql: "SELECT * FROM products WHERE id = ? AND user_id = ?",
+    args: [id, userId],
   });
   return (result.rows[0] as unknown as Product) || null;
 }
 
-export async function getProductByBarcode(barcode: string): Promise<Product | null> {
+export async function getProductByBarcode(barcode: string, userId: number): Promise<Product | null> {
   const result = await db.execute({
-    sql: "SELECT * FROM products WHERE barcode = ?",
-    args: [barcode],
+    sql: "SELECT * FROM products WHERE barcode = ? AND user_id = ?",
+    args: [barcode, userId],
   });
   return (result.rows[0] as unknown as Product) || null;
 }
 
-export async function createProduct(input: CreateProductInput): Promise<Product> {
+export async function createProduct(input: CreateProductInput, userId: number): Promise<Product> {
   const result = await db.execute({
-    sql: `INSERT INTO products (barcode, name, brand, category_id, default_quantity_unit, image_url)
-          VALUES (?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO products (barcode, name, brand, category_id, default_quantity_unit, image_url, user_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
           RETURNING *`,
     args: [
       input.barcode || null,
@@ -65,6 +68,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       input.category_id || null,
       input.default_quantity_unit || "units",
       input.image_url || null,
+      userId,
     ],
   });
   return result.rows[0] as unknown as Product;
@@ -72,7 +76,8 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
 
 export async function updateProduct(
   id: number,
-  input: Partial<CreateProductInput>
+  input: Partial<CreateProductInput>,
+  userId: number
 ): Promise<Product | null> {
   const updates: string[] = [];
   const args: (string | number | null)[] = [];
@@ -98,21 +103,22 @@ export async function updateProduct(
     args.push(input.image_url || null);
   }
 
-  if (updates.length === 0) return getProductById(id);
+  if (updates.length === 0) return getProductById(id, userId);
 
   updates.push("updated_at = datetime('now')");
-  args.push(id);
+  args.push(id, userId);
 
   const result = await db.execute({
-    sql: `UPDATE products SET ${updates.join(", ")} WHERE id = ? RETURNING *`,
+    sql: `UPDATE products SET ${updates.join(", ")} WHERE id = ? AND user_id = ? RETURNING *`,
     args,
   });
   return (result.rows[0] as unknown as Product) || null;
 }
 
-// Inventory
-export async function getInventory(): Promise<InventoryWithProduct[]> {
-  const result = await db.execute(`
+// Inventory (user-scoped)
+export async function getInventory(userId: number): Promise<InventoryWithProduct[]> {
+  const result = await db.execute({
+    sql: `
     SELECT
       i.*,
       p.barcode as product_barcode,
@@ -125,8 +131,11 @@ export async function getInventory(): Promise<InventoryWithProduct[]> {
     FROM inventory i
     JOIN products p ON i.product_id = p.id
     LEFT JOIN categories c ON p.category_id = c.id
+    WHERE i.user_id = ?
     ORDER BY i.expiry_date ASC NULLS LAST
-  `);
+  `,
+    args: [userId],
+  });
 
   return result.rows.map((row: Record<string, unknown>) => ({
     id: row.id as number,
@@ -166,8 +175,8 @@ export async function getInventory(): Promise<InventoryWithProduct[]> {
   }));
 }
 
-export async function getExpiringItems(days: number = 7): Promise<InventoryWithProduct[]> {
-  const inventory = await getInventory();
+export async function getExpiringItems(days: number = 7, userId: number): Promise<InventoryWithProduct[]> {
+  const inventory = await getInventory(userId);
   const now = new Date();
   const threshold = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
 
@@ -178,16 +187,18 @@ export async function getExpiringItems(days: number = 7): Promise<InventoryWithP
   });
 }
 
-export async function addToInventory(input: AddToInventoryInput): Promise<InventoryItem> {
+export async function addToInventory(input: AddToInventoryInput, userId: number): Promise<InventoryItem> {
   // Check if product already exists in inventory (same product, location, and expiry)
   const existingResult = await db.execute({
     sql: `SELECT * FROM inventory
           WHERE product_id = ?
+          AND user_id = ?
           AND (location IS ? OR (location IS NULL AND ? IS NULL))
           AND (expiry_date IS ? OR (expiry_date IS NULL AND ? IS NULL))
           LIMIT 1`,
     args: [
       input.product_id,
+      userId,
       input.location || null,
       input.location || null,
       input.expiry_date || null,
@@ -210,8 +221,8 @@ export async function addToInventory(input: AddToInventoryInput): Promise<Invent
   } else {
     // Create new entry
     const result = await db.execute({
-      sql: `INSERT INTO inventory (product_id, quantity, quantity_unit, expiry_date, location, purchase_date, purchase_price)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+      sql: `INSERT INTO inventory (product_id, quantity, quantity_unit, expiry_date, location, purchase_date, purchase_price, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING *`,
       args: [
         input.product_id,
@@ -221,6 +232,7 @@ export async function addToInventory(input: AddToInventoryInput): Promise<Invent
         input.location || null,
         input.purchase_date || null,
         input.purchase_price || null,
+        userId,
       ],
     });
     item = result.rows[0] as unknown as InventoryItem;
@@ -228,9 +240,9 @@ export async function addToInventory(input: AddToInventoryInput): Promise<Invent
 
   // Record transaction
   await db.execute({
-    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source)
-          VALUES (?, ?, 'add', ?, ?)`,
-    args: [input.product_id, item.id, input.quantity, input.source || "manual"],
+    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id)
+          VALUES (?, ?, 'add', ?, ?, ?)`,
+    args: [input.product_id, item.id, input.quantity, input.source || "manual", userId],
   });
 
   return item;
@@ -239,12 +251,13 @@ export async function addToInventory(input: AddToInventoryInput): Promise<Invent
 export async function removeFromInventory(
   inventoryId: number,
   quantity: number,
-  source: "manual" | "barcode" | "receipt" | "import" = "manual"
+  source: "manual" | "barcode" | "receipt" | "import" = "manual",
+  userId: number
 ): Promise<InventoryItem | null> {
-  // Get current item
+  // Get current item (verify ownership)
   const currentResult = await db.execute({
-    sql: "SELECT * FROM inventory WHERE id = ?",
-    args: [inventoryId],
+    sql: "SELECT * FROM inventory WHERE id = ? AND user_id = ?",
+    args: [inventoryId, userId],
   });
   const current = currentResult.rows[0] as unknown as InventoryItem;
   if (!current) return null;
@@ -254,9 +267,9 @@ export async function removeFromInventory(
   if (newQuantity <= 0) {
     // Record transaction first (before deleting inventory)
     await db.execute({
-      sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source)
-            VALUES (?, NULL, 'remove', ?, ?)`,
-      args: [current.product_id, current.quantity, source],
+      sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id)
+            VALUES (?, NULL, 'remove', ?, ?, ?)`,
+      args: [current.product_id, current.quantity, source, userId],
     });
 
     // Clear inventory_id references in old transactions
@@ -282,39 +295,91 @@ export async function removeFromInventory(
 
   // Record transaction
   await db.execute({
-    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source)
-          VALUES (?, ?, 'remove', ?, ?)`,
-    args: [current.product_id, inventoryId, quantity, source],
+    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id)
+          VALUES (?, ?, 'remove', ?, ?, ?)`,
+    args: [current.product_id, inventoryId, quantity, source, userId],
   });
 
   return result.rows[0] as unknown as InventoryItem;
 }
 
-// Transactions
-export async function getRecentTransactions(limit: number = 20): Promise<Transaction[]> {
+// Transactions (user-scoped)
+export async function getRecentTransactions(limit: number = 20, userId: number): Promise<Transaction[]> {
   const result = await db.execute({
     sql: `SELECT t.*, p.name as product_name
           FROM transactions t
           JOIN products p ON t.product_id = p.id
+          WHERE t.user_id = ?
           ORDER BY t.created_at DESC
           LIMIT ?`,
-    args: [limit],
+    args: [userId, limit],
   });
   return result.rows as unknown as Transaction[];
 }
 
-// Stats
-export async function getStats() {
+interface TransactionFilters {
+  limit?: number;
+  type?: string;
+  source?: string;
+  search?: string;
+}
+
+export async function getFilteredTransactions(filters: TransactionFilters, userId: number): Promise<Transaction[]> {
+  const { limit = 50, type, source, search } = filters;
+
+  let sql = `SELECT t.*, p.name as product_name
+             FROM transactions t
+             JOIN products p ON t.product_id = p.id
+             WHERE t.user_id = ?`;
+  const args: (string | number)[] = [userId];
+
+  if (type) {
+    sql += ` AND t.type = ?`;
+    args.push(type);
+  }
+
+  if (source) {
+    sql += ` AND t.source = ?`;
+    args.push(source);
+  }
+
+  if (search) {
+    sql += ` AND p.name LIKE ?`;
+    args.push(`%${search}%`);
+  }
+
+  sql += ` ORDER BY t.created_at DESC LIMIT ?`;
+  args.push(limit);
+
+  const result = await db.execute({ sql, args });
+  return result.rows as unknown as Transaction[];
+}
+
+// Stats (user-scoped)
+export async function getStats(userId: number) {
   const [totalProducts, expiringCount, lowStockCount, categoriesCount] = await Promise.all([
-    db.execute("SELECT COUNT(*) as count FROM inventory WHERE quantity > 0"),
-    db.execute(`
+    db.execute({
+      sql: "SELECT COUNT(*) as count FROM inventory WHERE quantity > 0 AND user_id = ?",
+      args: [userId],
+    }),
+    db.execute({
+      sql: `
       SELECT COUNT(*) as count FROM inventory
       WHERE expiry_date IS NOT NULL
       AND date(expiry_date) <= date('now', '+7 days')
       AND quantity > 0
-    `),
-    db.execute("SELECT COUNT(*) as count FROM inventory WHERE quantity > 0 AND quantity <= 1"),
-    db.execute("SELECT COUNT(DISTINCT category_id) as count FROM products WHERE category_id IS NOT NULL"),
+      AND user_id = ?
+    `,
+      args: [userId],
+    }),
+    db.execute({
+      sql: "SELECT COUNT(*) as count FROM inventory WHERE quantity > 0 AND quantity <= 1 AND user_id = ?",
+      args: [userId],
+    }),
+    db.execute({
+      sql: "SELECT COUNT(DISTINCT category_id) as count FROM products WHERE category_id IS NOT NULL AND user_id = ?",
+      args: [userId],
+    }),
   ]);
 
   return {

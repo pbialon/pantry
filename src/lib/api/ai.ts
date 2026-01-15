@@ -15,8 +15,7 @@ export interface ParsedProduct {
   name: string;
   brand?: string;
   category: string;
-  quantity?: string | number;
-  quantity_unit?: string;
+  quantity?: number;
 }
 
 const CATEGORIES = [
@@ -29,26 +28,33 @@ const CATEGORIES = [
   "Mrozonki",
   "Napoje",
   "Slodycze",
+  "Przekaski",
+  "Przyprawy",
   "Chemia domowa",
   "Inne",
 ];
 
 const SYSTEM_PROMPT = `Jestes asystentem do kategoryzacji produktow spozywczych.
+
+WAZNE: Wszystko liczymy w SZTUKACH (opakowaniach). Gramatura/pojemnosc jest czescia nazwy produktu.
+
 Dla kazdego produktu zwroc JSON z polami:
-- name: generyczna nazwa produktu (bez marki, bez ilosci)
+- name: pelna nazwa produktu WRAZ z gramatura/pojemnoscia (np. "Mleko UHT 3.2% 1L", "Jajka 10 sztuk", "Maslo 200g")
 - brand: marka (jesli jest widoczna w nazwie)
 - category: jedna z kategorii: ${CATEGORIES.join(", ")}
-- quantity: ilosc (np. "1", "500", "2")
-- quantity_unit: jednostka (np. "szt", "g", "kg", "ml", "l")
 
 Przyklady:
-"Mleko UHT 3.2% Laciate 1L" -> {"name": "Mleko UHT 3.2%", "brand": "Laciate", "category": "Nabial i jajka", "quantity": "1", "quantity_unit": "l"}
-"Chleb pszenny 500g" -> {"name": "Chleb pszenny", "category": "Pieczywo", "quantity": "500", "quantity_unit": "g"}
-"Fairy plyn do naczyn 900ml" -> {"name": "Plyn do naczyn", "brand": "Fairy", "category": "Chemia domowa", "quantity": "900", "quantity_unit": "ml"}
+"Mleko UHT 3.2% Laciate 1L" -> {"name": "Mleko UHT 3.2% 1L", "brand": "Laciate", "category": "Nabial i jajka"}
+"Jajka L 10 sztuk" -> {"name": "Jajka L 10 sztuk", "category": "Nabial i jajka"}
+"Chleb pszenny 500g" -> {"name": "Chleb pszenny 500g", "category": "Pieczywo"}
+"Fairy plyn do naczyn 900ml" -> {"name": "Plyn do naczyn 900ml", "brand": "Fairy", "category": "Chemia domowa"}
+"Maslo Ekstra 200g" -> {"name": "Maslo Ekstra 200g", "category": "Nabial i jajka"}
 
 Odpowiadaj TYLKO w formacie JSON array, bez dodatkowego tekstu.`;
 
 const RECEIPT_PARSE_PROMPT = `Jestes ekspertem od parsowania polskich paragonow fiskalnych.
+
+WAZNE: Wszystko liczymy w SZTUKACH (opakowaniach). Gramatura/pojemnosc jest czescia nazwy produktu.
 
 Z tekstu OCR wyodrebnij TYLKO produkty spozywcze/domowe.
 
@@ -56,31 +62,32 @@ IGNORUJ: adresy, NIP, daty, ceny, sumy, PTU, numery kas, kody transakcji, numery
 
 WAZNE - Nazwy produktow:
 - NIE kopiuj skrotow z paragonu (np. "MLK UHT", "JAJKO NIESPODZ", "CUK DR")
-- Tworz pelne, czytelne nazwy (np. "Mleko UHT 2%", "Jajko niespodzianka", "Cukier")
+- Tworz pelne, czytelne nazwy WRAZ z gramatura (np. "Mleko UHT 2% 1L", "Jajka 10 sztuk")
 - Jesli nie wiesz co to za produkt, pomin go
-- Jesli widzisz ilosc (np. "3 szt", "x2", "2*") - zapisz ja w polu quantity
+- Jesli widzisz ilosc opakowan (np. "3 szt", "x2", "2*") - zapisz ja w polu quantity
 
 Dla kazdego produktu zwroc:
-- name: PELNA, czytelna nazwa produktu (NIE skroty z paragonu!)
+- name: PELNA, czytelna nazwa produktu z gramatura (NIE skroty z paragonu!)
 - brand: TYLKO jesli to znana marka (Laciate, Danone, Wedel, Tymbark, Kinder, Ferrero, Milka, etc). Jesli nie rozpoznajesz marki - zostaw puste.
 - category: DOKLADNIE jedna z ponizszych (bez polskich znakow):
   * "Nabial i jajka" - mleko, jajka, ser, jogurt, maslo, smietana
   * "Mieso i ryby" - mieso, wedliny, ryby
   * "Warzywa i owoce" - owoce, warzywa, ziemniaki
   * "Pieczywo" - chleb, bulki, pieczywo
-  * "Spizarnia" - makaron, ryz, maka, cukier, olej, kasza, przyprawy
+  * "Spizarnia" - makaron, ryz, maka, cukier, olej, kasza
+  * "Przyprawy" - przyprawy, sol, pieprz, ziola
   * "Napoje" - woda, soki, napoje, kawa, herbata, piwo
   * "Mrozonki" - mrozone produkty
   * "Przekaski" - chipsy, slodycze, czekolada, ciastka
   * "Chemia domowa" - plyn do naczyn, proszek, papier toaletowy
   * "Inne" - inne produkty
-- quantity: ilosc (domyslnie 1, jesli jest info o wiekszej ilosci - np. "3 szt" = 3)
+- quantity: ilosc OPAKOWAN (domyslnie 1, jesli sa 3 opakowania mleka = 3)
 
 Przyklady rozpoznawania:
-- "MLK UHT LACIATE 2%" -> {"name": "Mleko UHT 2%", "brand": "Laciate", "category": "Nabial i jajka", "quantity": 1}
-- "JAJKO NIESPODZ" -> {"name": "Jajko niespodzianka", "brand": "Kinder", "category": "Przekaski", "quantity": 1}
-- "CHLEB PSZENNY 2 szt" -> {"name": "Chleb pszenny", "category": "Pieczywo", "quantity": 2}
-- "CUK DR DIAMANT" -> pomin (niejasne co to)
+- "MLK UHT LACIATE 2% 1L" -> {"name": "Mleko UHT 2% 1L", "brand": "Laciate", "category": "Nabial i jajka", "quantity": 1}
+- "JAJKA L 10SZT" -> {"name": "Jajka L 10 sztuk", "category": "Nabial i jajka", "quantity": 1}
+- "CHLEB PSZENNY 500G 2 szt" -> {"name": "Chleb pszenny 500g", "category": "Pieczywo", "quantity": 2}
+- "MASLO EKSTRA 200G" -> {"name": "Maslo Ekstra 200g", "category": "Nabial i jajka", "quantity": 1}
 
 Odpowiedz jako JSON: {"products": [...]}`;
 
