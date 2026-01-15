@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { X, Search, Plus, SkipForward } from "lucide-react";
 import type { Product } from "@/lib/db/schema";
 
@@ -19,6 +19,50 @@ interface ProductMatchDialogProps {
 
 type SelectionType = "create_new" | number;
 
+// Calculate similarity between two strings (0-1)
+function calculateSimilarity(str1: string, str2: string): number {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9ąćęłńóśźż]/g, " ").trim();
+  const getKeywords = (s: string) => normalize(s).split(/\s+/).filter(w => w.length > 2);
+
+  const keywords1 = getKeywords(str1);
+  const keywords2 = getKeywords(str2);
+
+  if (keywords1.length === 0 || keywords2.length === 0) return 0;
+
+  // Count how many keywords from str1 appear in str2
+  const matchCount = keywords1.filter(kw =>
+    keywords2.some(kw2 => kw2.includes(kw) || kw.includes(kw2))
+  ).length;
+
+  return matchCount / Math.max(keywords1.length, keywords2.length);
+}
+
+// Find the best matching product (if similarity > threshold)
+function findBestMatch(searchName: string, searchBrand: string | undefined, products: Product[]): number | null {
+  const SIMILARITY_THRESHOLD = 0.6;
+
+  let bestMatch: { productId: number; score: number } | null = null;
+
+  for (const product of products) {
+    // Calculate name similarity
+    let score = calculateSimilarity(searchName, product.name);
+
+    // Boost score if brands match
+    if (searchBrand && product.brand) {
+      const brandSimilarity = calculateSimilarity(searchBrand, product.brand);
+      if (brandSimilarity > 0.5) {
+        score = Math.min(1, score + 0.2);
+      }
+    }
+
+    if (score > SIMILARITY_THRESHOLD && (!bestMatch || score > bestMatch.score)) {
+      bestMatch = { productId: product.id, score };
+    }
+  }
+
+  return bestMatch?.productId ?? null;
+}
+
 export function ProductMatchDialog({
   isOpen,
   productName,
@@ -29,18 +73,24 @@ export function ProductMatchDialog({
   const modalRef = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<SelectionType>("create_new");
 
+  // Calculate best match when dialog opens
+  const defaultSelection = useMemo(() => {
+    const bestMatchId = findBestMatch(productName, productBrand, similarProducts);
+    return bestMatchId ?? "create_new";
+  }, [productName, productBrand, similarProducts]);
+
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
       modalRef.current?.focus();
-      setSelection("create_new");
+      setSelection(defaultSelection);
     } else {
       document.body.style.overflow = "";
     }
     return () => {
       document.body.style.overflow = "";
     };
-  }, [isOpen]);
+  }, [isOpen, defaultSelection]);
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
