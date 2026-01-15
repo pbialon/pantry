@@ -9,6 +9,70 @@ import type {
   AddToInventoryInput,
 } from "./schema";
 
+// Data scope helper - determines whether to filter by user_id or household_id
+export interface DataScope {
+  column: "user_id" | "household_id";
+  value: number;
+  userId: number; // Always include the actual user for actor_id
+  householdId: number | null;
+}
+
+export async function getDataScope(userId: number): Promise<DataScope> {
+  // Check if user belongs to a household
+  const result = await db.execute({
+    sql: `SELECT household_id FROM household_members WHERE user_id = ? LIMIT 1`,
+    args: [userId],
+  });
+
+  const householdId = result.rows[0]?.household_id as number | undefined;
+
+  if (householdId) {
+    return {
+      column: "household_id",
+      value: householdId,
+      userId,
+      householdId,
+    };
+  }
+
+  return {
+    column: "user_id",
+    value: userId,
+    userId,
+    householdId: null,
+  };
+}
+
+// Household types
+export interface Household {
+  id: number;
+  name: string;
+  created_by: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HouseholdMember {
+  id: number;
+  household_id: number;
+  user_id: number;
+  role: "owner" | "member";
+  joined_at: string;
+  user_name?: string;
+  user_email?: string;
+}
+
+export interface HouseholdInvite {
+  id: number;
+  household_id: number;
+  email: string;
+  token: string;
+  invited_by: number;
+  expires_at: string;
+  status: "pending" | "accepted" | "declined" | "expired";
+  created_at: string;
+}
+
 // Categories (shared across all users)
 export async function getCategories(): Promise<Category[]> {
   const result = await db.execute("SELECT * FROM categories ORDER BY name");
@@ -238,11 +302,11 @@ export async function addToInventory(input: AddToInventoryInput, userId: number)
     item = result.rows[0] as unknown as InventoryItem;
   }
 
-  // Record transaction
+  // Record transaction with actor_id
   await db.execute({
-    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id)
-          VALUES (?, ?, 'add', ?, ?, ?)`,
-    args: [input.product_id, item.id, input.quantity, input.source || "manual", userId],
+    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id, actor_id)
+          VALUES (?, ?, 'add', ?, ?, ?, ?)`,
+    args: [input.product_id, item.id, input.quantity, input.source || "manual", userId, userId],
   });
 
   return item;
@@ -267,9 +331,9 @@ export async function removeFromInventory(
   if (newQuantity <= 0) {
     // Record transaction first (before deleting inventory)
     await db.execute({
-      sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id)
-            VALUES (?, NULL, 'remove', ?, ?, ?)`,
-      args: [current.product_id, current.quantity, source, userId],
+      sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id, actor_id)
+            VALUES (?, NULL, 'remove', ?, ?, ?, ?)`,
+      args: [current.product_id, current.quantity, source, userId, userId],
     });
 
     // Clear inventory_id references in old transactions
@@ -293,11 +357,11 @@ export async function removeFromInventory(
     args: [newQuantity, inventoryId],
   });
 
-  // Record transaction
+  // Record transaction with actor_id
   await db.execute({
-    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id)
-          VALUES (?, ?, 'remove', ?, ?, ?)`,
-    args: [current.product_id, inventoryId, quantity, source, userId],
+    sql: `INSERT INTO transactions (product_id, inventory_id, type, quantity, source, user_id, actor_id)
+          VALUES (?, ?, 'remove', ?, ?, ?, ?)`,
+    args: [current.product_id, inventoryId, quantity, source, userId, userId],
   });
 
   return result.rows[0] as unknown as InventoryItem;
@@ -353,6 +417,104 @@ export async function getFilteredTransactions(filters: TransactionFilters, userI
 
   const result = await db.execute({ sql, args });
   return result.rows as unknown as Transaction[];
+}
+
+// Global search for inventory
+export interface SearchResult {
+  inventory: InventoryWithProduct[];
+  products: Product[];
+}
+
+export async function searchInventory(query: string, userId: number): Promise<SearchResult> {
+  const searchTerm = `%${query.toLowerCase()}%`;
+
+  // Search in inventory with product details
+  const inventoryResult = await db.execute({
+    sql: `
+      SELECT
+        i.*,
+        p.barcode as product_barcode,
+        p.name as product_name,
+        p.brand as product_brand,
+        p.category_id as product_category_id,
+        p.image_url as product_image_url,
+        c.name as category_name,
+        c.icon as category_icon
+      FROM inventory i
+      JOIN products p ON i.product_id = p.id
+      LEFT JOIN categories c ON p.category_id = c.id
+      WHERE i.user_id = ?
+      AND (
+        LOWER(p.name) LIKE ?
+        OR LOWER(p.brand) LIKE ?
+        OR LOWER(c.name) LIKE ?
+      )
+      ORDER BY
+        CASE
+          WHEN LOWER(p.name) LIKE ? THEN 1
+          WHEN LOWER(p.name) LIKE ? THEN 2
+          ELSE 3
+        END,
+        p.name
+      LIMIT 20
+    `,
+    args: [userId, searchTerm, searchTerm, searchTerm, query.toLowerCase() + '%', searchTerm],
+  });
+
+  const inventory = inventoryResult.rows.map((row: Record<string, unknown>) => ({
+    id: row.id as number,
+    product_id: row.product_id as number,
+    quantity: row.quantity as number,
+    quantity_unit: row.quantity_unit as string,
+    expiry_date: row.expiry_date as string | null,
+    location: row.location as string | null,
+    purchase_date: row.purchase_date as string | null,
+    purchase_price: row.purchase_price as number | null,
+    notes: row.notes as string | null,
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+    product: {
+      id: row.product_id as number,
+      barcode: row.product_barcode as string | null,
+      name: row.product_name as string,
+      brand: row.product_brand as string | null,
+      category_id: row.product_category_id as number | null,
+      image_url: row.product_image_url as string | null,
+      default_quantity_unit: "units",
+      nutrition_info: null,
+      created_at: "",
+      updated_at: "",
+    },
+    category: row.category_name
+      ? {
+          id: row.product_category_id as number,
+          name: row.category_name as string,
+          icon: row.category_icon as string | null,
+          parent_id: null,
+          default_expiry_days: null,
+          created_at: "",
+          updated_at: "",
+        }
+      : undefined,
+  }));
+
+  // Search products not in inventory
+  const productsResult = await db.execute({
+    sql: `
+      SELECT p.* FROM products p
+      WHERE p.user_id = ?
+      AND (LOWER(p.name) LIKE ? OR LOWER(p.brand) LIKE ?)
+      AND p.id NOT IN (SELECT DISTINCT product_id FROM inventory WHERE user_id = ? AND quantity > 0)
+      ORDER BY p.name
+      LIMIT 10
+    `,
+    args: [userId, searchTerm, searchTerm, userId],
+  });
+
+  return {
+    inventory,
+    products: productsResult.rows as unknown as Product[],
+  };
 }
 
 // Search similar products for matching
@@ -720,4 +882,212 @@ export async function getUsersWithExpiringProducts(days: number = 3): Promise<{ 
     count: row.count as number,
     products: ((row.products as string) || "").split(",").slice(0, 5),
   }));
+}
+
+// ==========================================
+// Household Management Functions
+// ==========================================
+
+// Get user's household
+export async function getUserHousehold(userId: number): Promise<Household | null> {
+  const result = await db.execute({
+    sql: `
+      SELECT h.* FROM households h
+      JOIN household_members hm ON h.id = hm.household_id
+      WHERE hm.user_id = ?
+      LIMIT 1
+    `,
+    args: [userId],
+  });
+  return (result.rows[0] as unknown as Household) || null;
+}
+
+// Get household members
+export async function getHouseholdMembers(householdId: number): Promise<HouseholdMember[]> {
+  const result = await db.execute({
+    sql: `
+      SELECT hm.*, u.name as user_name, u.email as user_email
+      FROM household_members hm
+      JOIN users u ON hm.user_id = u.id
+      WHERE hm.household_id = ?
+      ORDER BY hm.role DESC, hm.joined_at ASC
+    `,
+    args: [householdId],
+  });
+  return result.rows as unknown as HouseholdMember[];
+}
+
+// Create household
+export async function createHousehold(name: string, userId: number): Promise<Household> {
+  // Create household
+  const householdResult = await db.execute({
+    sql: `INSERT INTO households (name, created_by) VALUES (?, ?) RETURNING *`,
+    args: [name, userId],
+  });
+  const household = householdResult.rows[0] as unknown as Household;
+
+  // Add creator as owner
+  await db.execute({
+    sql: `INSERT INTO household_members (household_id, user_id, role) VALUES (?, ?, 'owner')`,
+    args: [household.id, userId],
+  });
+
+  // Migrate user's existing data to household
+  await migrateUserDataToHousehold(userId, household.id);
+
+  return household;
+}
+
+// Migrate user data to household
+async function migrateUserDataToHousehold(userId: number, householdId: number): Promise<void> {
+  await db.execute({
+    sql: `UPDATE products SET household_id = ? WHERE user_id = ? AND household_id IS NULL`,
+    args: [householdId, userId],
+  });
+  await db.execute({
+    sql: `UPDATE inventory SET household_id = ? WHERE user_id = ? AND household_id IS NULL`,
+    args: [householdId, userId],
+  });
+  await db.execute({
+    sql: `UPDATE transactions SET household_id = ?, actor_id = ? WHERE user_id = ? AND household_id IS NULL`,
+    args: [householdId, userId, userId],
+  });
+  await db.execute({
+    sql: `UPDATE shopping_list SET household_id = ? WHERE user_id = ? AND household_id IS NULL`,
+    args: [householdId, userId],
+  });
+}
+
+// Create invite
+export async function createHouseholdInvite(
+  householdId: number,
+  email: string,
+  invitedBy: number
+): Promise<HouseholdInvite> {
+  // Generate random token
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  // Expire in 7 days
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const result = await db.execute({
+    sql: `INSERT INTO household_invites (household_id, email, token, invited_by, expires_at)
+          VALUES (?, ?, ?, ?, ?)
+          RETURNING *`,
+    args: [householdId, email.toLowerCase(), token, invitedBy, expiresAt],
+  });
+
+  return result.rows[0] as unknown as HouseholdInvite;
+}
+
+// Get invite by token
+export async function getInviteByToken(token: string): Promise<(HouseholdInvite & { household_name: string }) | null> {
+  const result = await db.execute({
+    sql: `
+      SELECT hi.*, h.name as household_name
+      FROM household_invites hi
+      JOIN households h ON hi.household_id = h.id
+      WHERE hi.token = ?
+      AND hi.status = 'pending'
+      AND datetime(hi.expires_at) > datetime('now')
+    `,
+    args: [token],
+  });
+  return (result.rows[0] as unknown as (HouseholdInvite & { household_name: string })) || null;
+}
+
+// Accept invite
+export async function acceptHouseholdInvite(token: string, userId: number): Promise<boolean> {
+  const invite = await getInviteByToken(token);
+  if (!invite) return false;
+
+  // Add user to household
+  await db.execute({
+    sql: `INSERT INTO household_members (household_id, user_id, role) VALUES (?, ?, 'member')`,
+    args: [invite.household_id, userId],
+  });
+
+  // Mark invite as accepted
+  await db.execute({
+    sql: `UPDATE household_invites SET status = 'accepted' WHERE token = ?`,
+    args: [token],
+  });
+
+  // Migrate user's existing data to household
+  await migrateUserDataToHousehold(userId, invite.household_id);
+
+  return true;
+}
+
+// Get pending invites for a household
+export async function getHouseholdInvites(householdId: number): Promise<HouseholdInvite[]> {
+  const result = await db.execute({
+    sql: `SELECT * FROM household_invites
+          WHERE household_id = ?
+          AND status = 'pending'
+          AND datetime(expires_at) > datetime('now')
+          ORDER BY created_at DESC`,
+    args: [householdId],
+  });
+  return result.rows as unknown as HouseholdInvite[];
+}
+
+// Delete invite
+export async function deleteHouseholdInvite(inviteId: number, householdId: number): Promise<boolean> {
+  const result = await db.execute({
+    sql: `DELETE FROM household_invites WHERE id = ? AND household_id = ?`,
+    args: [inviteId, householdId],
+  });
+  return result.rowsAffected > 0;
+}
+
+// Leave household
+export async function leaveHousehold(userId: number): Promise<boolean> {
+  const membership = await db.execute({
+    sql: `SELECT * FROM household_members WHERE user_id = ?`,
+    args: [userId],
+  });
+
+  const member = membership.rows[0] as unknown as HouseholdMember | undefined;
+  if (!member) return false;
+
+  // Owner cannot leave (must delete household)
+  if (member.role === "owner") return false;
+
+  // Remove from household
+  await db.execute({
+    sql: `DELETE FROM household_members WHERE user_id = ?`,
+    args: [userId],
+  });
+
+  return true;
+}
+
+// Delete household (owner only)
+export async function deleteHousehold(householdId: number, userId: number): Promise<boolean> {
+  // Verify user is owner
+  const membership = await db.execute({
+    sql: `SELECT * FROM household_members WHERE household_id = ? AND user_id = ? AND role = 'owner'`,
+    args: [householdId, userId],
+  });
+
+  if (membership.rows.length === 0) return false;
+
+  // Delete all related data
+  await db.execute({
+    sql: `DELETE FROM household_invites WHERE household_id = ?`,
+    args: [householdId],
+  });
+  await db.execute({
+    sql: `DELETE FROM household_members WHERE household_id = ?`,
+    args: [householdId],
+  });
+  await db.execute({
+    sql: `DELETE FROM households WHERE id = ?`,
+    args: [householdId],
+  });
+
+  return true;
 }
