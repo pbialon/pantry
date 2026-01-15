@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getInventory, addToInventory, removeFromInventory, getExpiringItems } from "@/lib/db/queries";
+import { getInventory, addToInventory, removeFromInventory, getExpiringItems, clearAllInventory } from "@/lib/db/queries";
 import { addToInventoryInput } from "@/lib/db/schema";
 
 export async function GET(request: NextRequest) {
@@ -69,8 +69,15 @@ export async function DELETE(request: NextRequest) {
     const userId = parseInt(session.user.id);
 
     const { searchParams } = new URL(request.url);
+    const all = searchParams.get("all");
     const id = searchParams.get("id");
     const quantity = searchParams.get("quantity");
+
+    // Clear all inventory
+    if (all === "true") {
+      const deletedCount = await clearAllInventory(userId);
+      return NextResponse.json({ deleted: deletedCount });
+    }
 
     if (!id) {
       return NextResponse.json({ error: "Missing id parameter" }, { status: 400 });

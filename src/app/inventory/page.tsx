@@ -16,6 +16,7 @@ export default function InventoryPage() {
     isOpen: false,
     item: null,
   });
+  const [deleteAllModal, setDeleteAllModal] = useState(false);
 
   useEffect(() => {
     fetchInventory();
@@ -115,6 +116,23 @@ export default function InventoryPage() {
     closeDeleteModal();
   };
 
+  const handleDeleteAll = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/inventory?all=true", {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setInventory([]);
+      }
+    } catch (error) {
+      console.error("Error clearing inventory:", error);
+    } finally {
+      setLoading(false);
+      setDeleteAllModal(false);
+    }
+  };
+
   const groupedInventory = inventory.reduce((acc, item) => {
     const category = item.category?.name || "Inne";
     if (!acc[category]) acc[category] = [];
@@ -152,13 +170,24 @@ export default function InventoryPage() {
             <ArrowLeft className="w-4 h-4" />
             Powrot
           </Link>
-          <button
-            onClick={fetchInventory}
-            className="p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted"
-            title="Odswiez"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1">
+            {inventory.length > 0 && (
+              <button
+                onClick={() => setDeleteAllModal(true)}
+                className="p-2 text-muted-foreground hover:text-destructive rounded-lg hover:bg-destructive/10"
+                title="Usun wszystko"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
+            <button
+              onClick={fetchInventory}
+              className="p-2 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted"
+              title="Odswiez"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         <h1 className="text-2xl font-bold">Inwentarz</h1>
         <p className="text-muted-foreground mt-1">
@@ -276,6 +305,17 @@ export default function InventoryPage() {
         variant="danger"
         onConfirm={confirmDelete}
         onCancel={closeDeleteModal}
+      />
+
+      <ConfirmModal
+        isOpen={deleteAllModal}
+        title="Usunac wszystko?"
+        message={`Czy na pewno chcesz usunac wszystkie ${inventory.length} produktow z inwentarza? Ta operacja jest nieodwracalna.`}
+        confirmText="Usun wszystko"
+        cancelText="Anuluj"
+        variant="danger"
+        onConfirm={handleDeleteAll}
+        onCancel={() => setDeleteAllModal(false)}
       />
     </main>
   );

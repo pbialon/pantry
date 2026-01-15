@@ -433,3 +433,20 @@ export async function getStats(userId: number) {
     categoriesCount: (categoriesCount.rows[0] as unknown as { count: number }).count,
   };
 }
+
+// Clear all inventory (user-scoped)
+export async function clearAllInventory(userId: number): Promise<number> {
+  // First, clear inventory_id references in transactions
+  await db.execute({
+    sql: "UPDATE transactions SET inventory_id = NULL WHERE user_id = ?",
+    args: [userId],
+  });
+
+  // Delete all inventory items for this user
+  const result = await db.execute({
+    sql: "DELETE FROM inventory WHERE user_id = ?",
+    args: [userId],
+  });
+
+  return result.rowsAffected;
+}
