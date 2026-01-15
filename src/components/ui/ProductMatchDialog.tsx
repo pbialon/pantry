@@ -1,34 +1,39 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, Search, Plus } from "lucide-react";
+import { X, Search, Plus, SkipForward } from "lucide-react";
 import type { Product } from "@/lib/db/schema";
+
+export type MatchDialogResult =
+  | { action: "skip" }
+  | { action: "create_new" }
+  | { action: "use_existing"; productId: number };
 
 interface ProductMatchDialogProps {
   isOpen: boolean;
   productName: string;
   productBrand?: string;
   similarProducts: Product[];
-  onSelect: (productId: number | null) => void;
-  onCancel: () => void;
+  onResult: (result: MatchDialogResult) => void;
 }
+
+type SelectionType = "create_new" | number;
 
 export function ProductMatchDialog({
   isOpen,
   productName,
   productBrand,
   similarProducts,
-  onSelect,
-  onCancel,
+  onResult,
 }: ProductMatchDialogProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selection, setSelection] = useState<SelectionType>("create_new");
 
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = "hidden";
       modalRef.current?.focus();
-      setSelectedId(null);
+      setSelection("create_new");
     } else {
       document.body.style.overflow = "";
     }
@@ -40,25 +45,33 @@ export function ProductMatchDialog({
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape" && isOpen) {
-        onCancel();
+        onResult({ action: "skip" });
       }
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onCancel]);
+  }, [isOpen, onResult]);
 
   if (!isOpen) return null;
 
+  const handleSkip = () => {
+    onResult({ action: "skip" });
+  };
+
   const handleConfirm = () => {
-    onSelect(selectedId);
+    if (selection === "create_new") {
+      onResult({ action: "create_new" });
+    } else {
+      onResult({ action: "use_existing", productId: selection });
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
+      {/* Backdrop - clicking backdrop skips the item */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onCancel}
+        onClick={handleSkip}
       />
 
       {/* Modal */}
@@ -69,8 +82,9 @@ export function ProductMatchDialog({
       >
         {/* Close button */}
         <button
-          onClick={onCancel}
+          onClick={handleSkip}
           className="absolute top-3 right-3 p-1 rounded-lg hover:bg-muted transition-colors"
+          title="Pomin produkt"
         >
           <X className="w-4 h-4 text-muted-foreground" />
         </button>
@@ -97,7 +111,7 @@ export function ProductMatchDialog({
               <label
                 key={product.id}
                 className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                  selectedId === product.id
+                  selection === product.id
                     ? "border-primary bg-primary/5"
                     : "border-border hover:bg-muted/50"
                 }`}
@@ -106,8 +120,8 @@ export function ProductMatchDialog({
                   type="radio"
                   name="product-match"
                   value={product.id}
-                  checked={selectedId === product.id}
-                  onChange={() => setSelectedId(product.id)}
+                  checked={selection === product.id}
+                  onChange={() => setSelection(product.id)}
                   className="w-4 h-4 text-primary"
                 />
                 <div className="flex-1 min-w-0">
@@ -122,7 +136,7 @@ export function ProductMatchDialog({
             {/* Create new option */}
             <label
               className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                selectedId === null
+                selection === "create_new"
                   ? "border-primary bg-primary/5"
                   : "border-border hover:bg-muted/50"
               }`}
@@ -130,9 +144,9 @@ export function ProductMatchDialog({
               <input
                 type="radio"
                 name="product-match"
-                value=""
-                checked={selectedId === null}
-                onChange={() => setSelectedId(null)}
+                value="create_new"
+                checked={selection === "create_new"}
+                onChange={() => setSelection("create_new")}
                 className="w-4 h-4 text-primary"
               />
               <div className="flex items-center gap-2">
@@ -145,10 +159,11 @@ export function ProductMatchDialog({
           {/* Actions */}
           <div className="flex gap-3">
             <button
-              onClick={onCancel}
-              className="flex-1 py-2.5 px-4 border rounded-lg font-medium hover:bg-accent transition-colors"
+              onClick={handleSkip}
+              className="flex-1 py-2.5 px-4 border rounded-lg font-medium hover:bg-accent transition-colors flex items-center justify-center gap-2"
             >
-              Anuluj
+              <SkipForward className="w-4 h-4" />
+              Pomin
             </button>
             <button
               onClick={handleConfirm}

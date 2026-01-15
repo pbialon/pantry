@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, Sparkles, CheckCircle, AlertCircle, Pencil, X, Check } from "lucide-react";
-import { ProductMatchDialog } from "@/components/ui/ProductMatchDialog";
+import { ProductMatchDialog, type MatchDialogResult } from "@/components/ui/ProductMatchDialog";
 import type { Product } from "@/lib/db/schema";
 
 interface Category {
@@ -26,7 +26,7 @@ interface MatchDialogState {
   isOpen: boolean;
   item: CategorizedItem | null;
   similarProducts: Product[];
-  resolve: ((productId: number | null) => void) | null;
+  resolve: ((result: MatchDialogResult) => void) | null;
 }
 
 
@@ -65,7 +65,7 @@ export default function ImportPage() {
     return [];
   }, []);
 
-  const showMatchDialog = useCallback((item: CategorizedItem, similarProducts: Product[]): Promise<number | null> => {
+  const showMatchDialog = useCallback((item: CategorizedItem, similarProducts: Product[]): Promise<MatchDialogResult> => {
     return new Promise((resolve) => {
       setMatchDialog({
         isOpen: true,
@@ -76,21 +76,9 @@ export default function ImportPage() {
     });
   }, []);
 
-  const handleMatchDialogSelect = useCallback((productId: number | null) => {
+  const handleMatchDialogResult = useCallback((result: MatchDialogResult) => {
     if (matchDialog.resolve) {
-      matchDialog.resolve(productId);
-    }
-    setMatchDialog({
-      isOpen: false,
-      item: null,
-      similarProducts: [],
-      resolve: null,
-    });
-  }, [matchDialog.resolve]);
-
-  const handleMatchDialogCancel = useCallback(() => {
-    if (matchDialog.resolve) {
-      matchDialog.resolve(null);
+      matchDialog.resolve(result);
     }
     setMatchDialog({
       isOpen: false,
@@ -217,18 +205,19 @@ export default function ImportPage() {
 
         if (similarProducts.length > 0) {
           // Show dialog and wait for user selection
-          const selectedProductId = await showMatchDialog(item, similarProducts);
+          const result = await showMatchDialog(item, similarProducts);
 
-          if (selectedProductId === null) {
-            // User chose to create new or dialog returned null (create new)
-            // If user cancelled (pressed Anuluj), we still create new product
-            // To skip item entirely, user would need to deselect it before import
+          if (result.action === "skip") {
+            // User chose to skip this item
+            skipped++;
+            continue;
           }
 
-          if (selectedProductId !== null && selectedProductId > 0) {
+          if (result.action === "use_existing") {
             // User selected existing product
-            productId = selectedProductId;
+            productId = result.productId;
           }
+          // result.action === "create_new" -> productId stays null, will create below
         }
 
         // Create new product if no existing was selected
@@ -284,7 +273,7 @@ export default function ImportPage() {
       setInput("");
       setItems([]);
       if (skipped > 0) {
-        setError(`Pomineto ${skipped} produktow z powodu bledow`);
+        setError(`Pomineto ${skipped} produktow`);
       }
     } catch (err) {
       console.error("Import error:", err);
@@ -500,8 +489,7 @@ export default function ImportPage() {
         productName={matchDialog.item?.name || ""}
         productBrand={matchDialog.item?.brand || undefined}
         similarProducts={matchDialog.similarProducts}
-        onSelect={handleMatchDialogSelect}
-        onCancel={handleMatchDialogCancel}
+        onResult={handleMatchDialogResult}
       />
     </main>
   );
