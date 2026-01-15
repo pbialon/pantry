@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pantry-v2';
+const CACHE_NAME = 'pantry-v3';
 const STATIC_ASSETS = [
   '/',
   '/scan',
@@ -6,6 +6,8 @@ const STATIC_ASSETS = [
   '/import',
   '/receipt',
   '/history',
+  '/shopping',
+  '/stats',
   '/manifest.json',
   '/icons/icon.svg',
 ];
@@ -84,5 +86,56 @@ self.addEventListener('fetch', (event) => {
           return new Response('Offline', { status: 503 });
         });
       })
+  );
+});
+
+// Push notification event
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+
+  try {
+    const data = event.data.json();
+    const options = {
+      body: data.body || 'Nowe powiadomienie',
+      icon: data.icon || '/icons/icon-192x192.png',
+      badge: data.badge || '/icons/icon-72x72.png',
+      vibrate: [100, 50, 100],
+      data: data.data || {},
+      actions: [
+        { action: 'open', title: 'Otworz' },
+        { action: 'close', title: 'Zamknij' },
+      ],
+    };
+
+    event.waitUntil(
+      self.registration.showNotification(data.title || 'Pantry Manager', options)
+    );
+  } catch (error) {
+    console.error('Error showing notification:', error);
+  }
+});
+
+// Notification click event
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  if (event.action === 'close') return;
+
+  const urlToOpen = event.notification.data?.url || '/inventory';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      // Check if there's already a window open
+      for (const client of clientList) {
+        if (client.url.includes(self.location.origin) && 'focus' in client) {
+          client.navigate(urlToOpen);
+          return client.focus();
+        }
+      }
+      // Open new window if none exists
+      if (self.clients.openWindow) {
+        return self.clients.openWindow(urlToOpen);
+      }
+    })
   );
 });

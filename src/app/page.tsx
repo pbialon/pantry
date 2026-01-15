@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Package, ScanBarcode, Receipt, ShoppingCart, TrendingUp, Plus, Minus, AlertTriangle, PackageMinus, History, BarChart3, LogOut, User } from "lucide-react";
+import { Package, ScanBarcode, Receipt, ShoppingCart, TrendingUp, Plus, Minus, AlertTriangle, PackageMinus, History, BarChart3, LogOut, User, ClipboardList } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import { NotificationSetup } from "@/components/NotificationSetup";
 import { formatDateTime, translateTransactionType, translateSource } from "@/lib/utils";
 
 interface Stats {
@@ -112,7 +113,7 @@ export default function Dashboard() {
       </header>
 
       {/* Quick Actions */}
-      <section className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <section className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
         <QuickAction
           href="/scan"
           icon={<ScanBarcode className="w-6 h-6" />}
@@ -137,6 +138,23 @@ export default function Dashboard() {
           label="Inwentarz"
           description="Wszystkie produkty"
         />
+        <QuickAction
+          href="/shopping"
+          icon={<ClipboardList className="w-6 h-6" />}
+          label="Lista zakupow"
+          description="Do kupienia"
+        />
+        <QuickAction
+          href="/stats"
+          icon={<BarChart3 className="w-6 h-6" />}
+          label="Statystyki"
+          description="Wykresy"
+        />
+      </section>
+
+      {/* Notifications */}
+      <section className="mb-8">
+        <NotificationSetup />
       </section>
 
       {/* Stock Summary */}

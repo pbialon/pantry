@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Minus, Trash2, Package, RefreshCw } from "lucide-react";
 import type { InventoryWithProduct } from "@/lib/db/schema";
@@ -18,11 +18,7 @@ export default function InventoryPage() {
   });
   const [deleteAllModal, setDeleteAllModal] = useState(false);
 
-  useEffect(() => {
-    fetchInventory();
-  }, []);
-
-  const fetchInventory = async () => {
+  const fetchInventory = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/inventory");
@@ -35,9 +31,13 @@ export default function InventoryPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleAdd = async (id: number, productId: number) => {
+  useEffect(() => {
+    fetchInventory();
+  }, [fetchInventory]);
+
+  const handleAdd = useCallback(async (id: number, productId: number) => {
     setActionLoading(id);
     try {
       const res = await fetch("/api/inventory", {
@@ -56,18 +56,15 @@ export default function InventoryPage() {
             item.id === id ? { ...item, quantity: item.quantity + 1 } : item
           )
         );
-      } else {
-        fetchInventory();
       }
     } catch (error) {
       console.error("Error adding item:", error);
-      fetchInventory();
     } finally {
       setActionLoading(null);
     }
-  };
+  }, []);
 
-  const handleRemove = async (id: number, quantity: number = 1) => {
+  const handleRemove = useCallback(async (id: number, quantity: number = 1) => {
     setActionLoading(id);
     try {
       const res = await fetch(`/api/inventory?id=${id}&quantity=${quantity}`, {
@@ -90,20 +87,17 @@ export default function InventoryPage() {
       } else {
         const error = await res.json();
         console.error("Error removing item:", error);
-        // Refresh to get actual state
-        fetchInventory();
       }
     } catch (error) {
       console.error("Error removing item:", error);
-      fetchInventory();
     } finally {
       setActionLoading(null);
     }
-  };
+  }, []);
 
-  const openDeleteModal = (item: InventoryWithProduct) => {
+  const openDeleteModal = useCallback((item: InventoryWithProduct) => {
     setDeleteModal({ isOpen: true, item });
-  };
+  }, []);
 
   const closeDeleteModal = () => {
     setDeleteModal({ isOpen: false, item: null });
@@ -321,7 +315,7 @@ export default function InventoryPage() {
   );
 }
 
-function InventoryCard({
+const InventoryCard = memo(function InventoryCard({
   item,
   onAdd,
   onRemove,
@@ -350,7 +344,7 @@ function InventoryCard({
   };
 
   return (
-    <div className={`p-4 bg-card rounded-lg border ${isLoading ? "opacity-50" : ""}`}>
+    <div className={`p-4 bg-card rounded-lg border transition-opacity ${isLoading ? "opacity-50" : ""}`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
           <h3 className="font-medium truncate">{item.product.name}</h3>
@@ -358,7 +352,7 @@ function InventoryCard({
             <p className="text-sm text-muted-foreground">{item.product.brand}</p>
           )}
           <div className="flex items-center gap-2 mt-2 text-sm">
-            <span className="font-medium">
+            <span className="font-medium tabular-nums">
               {item.quantity} szt.
             </span>
             {item.location && (
@@ -414,4 +408,4 @@ function InventoryCard({
       </div>
     </div>
   );
-}
+});
