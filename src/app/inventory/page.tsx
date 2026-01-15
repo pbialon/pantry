@@ -1,22 +1,53 @@
 "use client";
 
-import { useState, useEffect, useCallback, memo } from "react";
+import { useState, useEffect, useCallback, memo, useMemo } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Minus, Trash2, Package, RefreshCw } from "lucide-react";
+import { ArrowLeft, Plus, Minus, Trash2, Package, RefreshCw, ImageOff, Filter, X } from "lucide-react";
 import type { InventoryWithProduct } from "@/lib/db/schema";
 import { daysUntil, getExpiryStatus, formatDate } from "@/lib/utils";
 import { ConfirmModal } from "@/components/ui/ConfirmModal";
+import { SearchBar } from "@/components/SearchBar";
+
+type ExpiryFilter = "all" | "expired" | "warning" | "ok";
+type LocationFilter = "all" | "pantry" | "fridge" | "freezer";
+type QuantityFilter = "all" | "low";
 
 export default function InventoryPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [inventory, setInventory] = useState<InventoryWithProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<string>("all");
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [deleteModal, setDeleteModal] = useState<{ isOpen: boolean; item: InventoryWithProduct | null }>({
     isOpen: false,
     item: null,
   });
   const [deleteAllModal, setDeleteAllModal] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+
+  // Read filters from URL
+  const categoryFilter = searchParams.get("category") || "all";
+  const expiryFilter = (searchParams.get("expiry") || "all") as ExpiryFilter;
+  const locationFilter = (searchParams.get("location") || "all") as LocationFilter;
+  const quantityFilter = (searchParams.get("quantity") || "all") as QuantityFilter;
+
+  const updateFilter = useCallback((key: string, value: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === "all") {
+      params.delete(key);
+    } else {
+      params.set(key, value);
+    }
+    router.push(`/inventory?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
+
+  const clearAllFilters = useCallback(() => {
+    router.push("/inventory", { scroll: false });
+  }, [router]);
+
+  const hasActiveFilters = categoryFilter !== "all" || expiryFilter !== "all" || locationFilter !== "all" || quantityFilter !== "all";
 
   const fetchInventory = useCallback(async () => {
     setLoading(true);
@@ -127,18 +158,55 @@ export default function InventoryPage() {
     }
   };
 
-  const groupedInventory = inventory.reduce((acc, item) => {
-    const category = item.category?.name || "Inne";
-    if (!acc[category]) acc[category] = [];
-    acc[category].push(item);
-    return acc;
-  }, {} as Record<string, InventoryWithProduct[]>);
+  // Apply all filters
+  const filteredInventory = useMemo(() => {
+    return inventory.filter((item) => {
+      // Category filter
+      const itemCategory = item.category?.name || "Inne";
+      if (categoryFilter !== "all" && itemCategory !== categoryFilter) {
+        return false;
+      }
 
-  const filteredCategories = Object.entries(groupedInventory).filter(
-    ([category]) => filter === "all" || category === filter
-  );
+      // Expiry filter
+      if (expiryFilter !== "all") {
+        const expiryDays = item.expiry_date ? daysUntil(item.expiry_date) : null;
+        const status = expiryDays !== null ? getExpiryStatus(expiryDays) : null;
+        if (expiryFilter === "expired" && status !== "expired") return false;
+        if (expiryFilter === "warning" && status !== "warning") return false;
+        if (expiryFilter === "ok" && status !== "ok") return false;
+      }
 
-  const categories = ["all", ...Object.keys(groupedInventory)];
+      // Location filter
+      if (locationFilter !== "all" && item.location !== locationFilter) {
+        return false;
+      }
+
+      // Quantity filter
+      if (quantityFilter === "low" && item.quantity > 1) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [inventory, categoryFilter, expiryFilter, locationFilter, quantityFilter]);
+
+  const groupedInventory = useMemo(() => {
+    return filteredInventory.reduce((acc, item) => {
+      const category = item.category?.name || "Inne";
+      if (!acc[category]) acc[category] = [];
+      acc[category].push(item);
+      return acc;
+    }, {} as Record<string, InventoryWithProduct[]>);
+  }, [filteredInventory]);
+
+  const categories = useMemo(() => {
+    const allCategories = inventory.reduce((acc, item) => {
+      const category = item.category?.name || "Inne";
+      if (!acc.includes(category)) acc.push(category);
+      return acc;
+    }, [] as string[]);
+    return ["all", ...allCategories.sort()];
+  }, [inventory]);
 
   if (loading) {
     return (
@@ -185,8 +253,144 @@ export default function InventoryPage() {
         </div>
         <h1 className="text-2xl font-bold">Inwentarz</h1>
         <p className="text-muted-foreground mt-1">
-          {inventory.length} {inventory.length === 1 ? "produkt" : "produktow"} w magazynie
+          {filteredInventory.length} z {inventory.length} produktow
         </p>
+        <div className="mt-4 flex gap-2">
+          <div className="flex-1">
+            <SearchBar />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`p-2 rounded-lg transition-colors ${
+              hasActiveFilters
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:text-foreground"
+            }`}
+            title="Filtry"
+          >
+            <Filter className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Filter panel */}
+        {showFilters && (
+          <div className="mt-4 p-4 bg-card rounded-lg border space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="font-medium text-sm">Filtry</span>
+              {hasActiveFilters && (
+                <button
+                  onClick={clearAllFilters}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Wyczysc filtry
+                </button>
+              )}
+            </div>
+
+            {/* Expiry filter */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Status waznosci</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "all", label: "Wszystkie" },
+                  { value: "expired", label: "Przeterminowane" },
+                  { value: "warning", label: "Wygasajace" },
+                  { value: "ok", label: "OK" },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => updateFilter("expiry", value)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      expiryFilter === value
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted hover:bg-muted/80"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Location filter */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Lokalizacja</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "all", label: "Wszystkie" },
+                  { value: "pantry", label: "Spizarnia" },
+                  { value: "fridge", label: "Lodowka" },
+                  { value: "freezer", label: "Zamrazarka" },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => updateFilter("location", value)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      locationFilter === value
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted hover:bg-muted/80"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quantity filter */}
+            <div>
+              <label className="text-xs text-muted-foreground mb-1.5 block">Ilosc</label>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { value: "all", label: "Wszystkie" },
+                  { value: "low", label: "Niski stan (1 szt.)" },
+                ].map(({ value, label }) => (
+                  <button
+                    key={value}
+                    onClick={() => updateFilter("quantity", value)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                      quantityFilter === value
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted hover:bg-muted/80"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Active filter badges */}
+        {hasActiveFilters && !showFilters && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {categoryFilter !== "all" && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
+                {categoryFilter}
+                <button onClick={() => updateFilter("category", "all")}><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {expiryFilter !== "all" && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
+                {expiryFilter === "expired" ? "Przeterminowane" : expiryFilter === "warning" ? "Wygasajace" : "OK"}
+                <button onClick={() => updateFilter("expiry", "all")}><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {locationFilter !== "all" && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
+                {locationFilter === "pantry" ? "Spizarnia" : locationFilter === "fridge" ? "Lodowka" : "Zamrazarka"}
+                <button onClick={() => updateFilter("location", "all")}><X className="w-3 h-3" /></button>
+              </span>
+            )}
+            {quantityFilter !== "all" && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary rounded-md text-xs">
+                Niski stan
+                <button onClick={() => updateFilter("quantity", "all")}><X className="w-3 h-3" /></button>
+              </span>
+            )}
+          </div>
+        )}
       </header>
 
       {/* Mobile: Horizontal scrollable tabs */}
@@ -194,20 +398,20 @@ export default function InventoryPage() {
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
           {categories.map((cat) => {
             const count = cat === "all"
-              ? inventory.length
+              ? filteredInventory.length
               : groupedInventory[cat]?.length || 0;
             return (
               <button
                 key={cat}
-                onClick={() => setFilter(cat)}
+                onClick={() => updateFilter("category", cat)}
                 className={`flex-shrink-0 px-3 py-2 rounded-full text-sm font-medium transition-colors ${
-                  filter === cat
+                  categoryFilter === cat
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted hover:bg-muted/80"
                 }`}
               >
                 {cat === "all" ? "Wszystkie" : cat}
-                <span className={`ml-1.5 ${filter === cat ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                <span className={`ml-1.5 ${categoryFilter === cat ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                   {count}
                 </span>
               </button>
@@ -222,14 +426,14 @@ export default function InventoryPage() {
           <nav className="sticky top-8 space-y-1">
             {categories.map((cat) => {
               const count = cat === "all"
-                ? inventory.length
+                ? filteredInventory.length
                 : groupedInventory[cat]?.length || 0;
               return (
                 <button
                   key={cat}
-                  onClick={() => setFilter(cat)}
+                  onClick={() => updateFilter("category", cat)}
                   className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                    filter === cat
+                    categoryFilter === cat
                       ? "bg-primary text-primary-foreground"
                       : "hover:bg-muted"
                   }`}
@@ -237,7 +441,7 @@ export default function InventoryPage() {
                   <span className="block truncate">
                     {cat === "all" ? "Wszystkie" : cat}
                   </span>
-                  <span className={`text-xs ${filter === cat ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
+                  <span className={`text-xs ${categoryFilter === cat ? "text-primary-foreground/70" : "text-muted-foreground"}`}>
                     {count} {count === 1 ? "produkt" : "produktow"}
                   </span>
                 </button>
@@ -264,9 +468,23 @@ export default function InventoryPage() {
             Dodaj produkt
           </Link>
         </div>
+      ) : filteredInventory.length === 0 ? (
+        <div className="text-center py-12">
+          <Filter className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+          <h2 className="text-lg font-medium mb-2">Brak wynikow</h2>
+          <p className="text-muted-foreground mb-4">
+            Zaden produkt nie pasuje do wybranych filtrow
+          </p>
+          <button
+            onClick={clearAllFilters}
+            className="text-primary hover:underline"
+          >
+            Wyczysc filtry
+          </button>
+        </div>
       ) : (
         <div className="space-y-6">
-          {filteredCategories.map(([category, items]) => (
+          {Object.entries(groupedInventory).map(([category, items]) => (
             <section key={category}>
               <h2 className="text-sm font-medium text-muted-foreground mb-2">
                 {category} ({items.length})
@@ -345,13 +563,25 @@ const InventoryCard = memo(function InventoryCard({
 
   return (
     <div className={`p-4 bg-card rounded-lg border transition-opacity ${isLoading ? "opacity-50" : ""}`}>
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start gap-3">
+        {/* Product Image */}
+        <div className="w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-muted flex items-center justify-center">
+          {item.product.image_url ? (
+            <img
+              src={item.product.image_url}
+              alt={item.product.name}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <ImageOff className="w-5 h-5 text-muted-foreground" />
+          )}
+        </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-medium truncate">{item.product.name}</h3>
           {item.product.brand && (
             <p className="text-sm text-muted-foreground">{item.product.brand}</p>
           )}
-          <div className="flex items-center gap-2 mt-2 text-sm">
+          <div className="flex items-center gap-2 mt-1 text-sm">
             <span className="font-medium tabular-nums">
               {item.quantity} szt.
             </span>
@@ -363,7 +593,7 @@ const InventoryCard = memo(function InventoryCard({
           </div>
           {item.expiry_date && expiryStatus && (
             <div
-              className={`inline-flex items-center gap-1 mt-2 px-2 py-1 rounded text-xs ${statusColors[expiryStatus]}`}
+              className={`inline-flex items-center gap-1 mt-1 px-2 py-1 rounded text-xs ${statusColors[expiryStatus]}`}
             >
               {expiryStatus === "expired"
                 ? "Przeterminowany"
