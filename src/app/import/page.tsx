@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { ArrowLeft, Sparkles, CheckCircle, AlertCircle, Pencil, X, Check } from "lucide-react";
+import { ProductMatchDialog } from "@/components/ui/ProductMatchDialog";
+import type { Product } from "@/lib/db/schema";
 
 interface Category {
   id: number;
@@ -20,6 +22,13 @@ interface CategorizedItem {
   editing: boolean;
 }
 
+interface MatchDialogState {
+  isOpen: boolean;
+  item: CategorizedItem | null;
+  similarProducts: Product[];
+  resolve: ((productId: number | null) => void) | null;
+}
+
 
 export default function ImportPage() {
   const [input, setInput] = useState("");
@@ -28,6 +37,12 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState(0);
+  const [matchDialog, setMatchDialog] = useState<MatchDialogState>({
+    isOpen: false,
+    item: null,
+    similarProducts: [],
+    resolve: null,
+  });
 
   useEffect(() => {
     fetch("/api/categories")
@@ -35,6 +50,55 @@ export default function ImportPage() {
       .then(setCategories)
       .catch(() => setCategories([]));
   }, []);
+
+  const searchSimilarProducts = useCallback(async (name: string, brand: string | null): Promise<Product[]> => {
+    try {
+      const params = new URLSearchParams({ name });
+      if (brand) params.append("brand", brand);
+      const res = await fetch(`/api/products/search?${params}`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.error("Error searching products:", err);
+    }
+    return [];
+  }, []);
+
+  const showMatchDialog = useCallback((item: CategorizedItem, similarProducts: Product[]): Promise<number | null> => {
+    return new Promise((resolve) => {
+      setMatchDialog({
+        isOpen: true,
+        item,
+        similarProducts,
+        resolve,
+      });
+    });
+  }, []);
+
+  const handleMatchDialogSelect = useCallback((productId: number | null) => {
+    if (matchDialog.resolve) {
+      matchDialog.resolve(productId);
+    }
+    setMatchDialog({
+      isOpen: false,
+      item: null,
+      similarProducts: [],
+      resolve: null,
+    });
+  }, [matchDialog.resolve]);
+
+  const handleMatchDialogCancel = useCallback(() => {
+    if (matchDialog.resolve) {
+      matchDialog.resolve(null);
+    }
+    setMatchDialog({
+      isOpen: false,
+      item: null,
+      similarProducts: [],
+      resolve: null,
+    });
+  }, [matchDialog.resolve]);
 
   const handleCategorize = async () => {
     if (!input.trim()) return;
@@ -142,40 +206,66 @@ export default function ImportPage() {
     setLoading(true);
     setError(null);
     let imported = 0;
+    let skipped = 0;
 
     try {
       for (const item of selectedItems) {
-        // Create product - include category for lookup
-        const productData: { name: string; brand?: string; category?: string } = {
-          name: item.name,
-        };
-        if (item.brand) {
-          productData.brand = item.brand;
-        }
-        if (item.category) {
-          productData.category = item.category;
-        }
+        // Search for similar products first
+        const similarProducts = await searchSimilarProducts(item.name, item.brand);
 
-        const productRes = await fetch("/api/products", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(productData),
-        });
+        let productId: number | null = null;
 
-        if (!productRes.ok) {
-          const errData = await productRes.json();
-          console.error("Product creation failed:", errData);
-          continue;
+        if (similarProducts.length > 0) {
+          // Show dialog and wait for user selection
+          const selectedProductId = await showMatchDialog(item, similarProducts);
+
+          if (selectedProductId === null) {
+            // User chose to create new or dialog returned null (create new)
+            // If user cancelled (pressed Anuluj), we still create new product
+            // To skip item entirely, user would need to deselect it before import
+          }
+
+          if (selectedProductId !== null && selectedProductId > 0) {
+            // User selected existing product
+            productId = selectedProductId;
+          }
         }
 
-        const product = await productRes.json();
+        // Create new product if no existing was selected
+        if (productId === null) {
+          const productData: { name: string; brand?: string; category?: string } = {
+            name: item.name,
+          };
+          if (item.brand) {
+            productData.brand = item.brand;
+          }
+          if (item.category) {
+            productData.category = item.category;
+          }
+
+          const productRes = await fetch("/api/products", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(productData),
+          });
+
+          if (!productRes.ok) {
+            const errData = await productRes.json();
+            console.error("Product creation failed:", errData);
+            skipped++;
+            continue;
+          }
+
+          const product = await productRes.json();
+          productId = product.id;
+        }
 
         // Add to inventory
         const inventoryRes = await fetch("/api/inventory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            product_id: product.id,
+            product_id: productId,
             quantity: item.quantity,
             source: "import",
           }),
@@ -186,12 +276,16 @@ export default function ImportPage() {
         } else {
           const errData = await inventoryRes.json();
           console.error("Inventory add failed:", errData);
+          skipped++;
         }
       }
 
       setSuccessCount(imported);
       setInput("");
       setItems([]);
+      if (skipped > 0) {
+        setError(`Pomineto ${skipped} produktow z powodu bledow`);
+      }
     } catch (err) {
       console.error("Import error:", err);
       setError("Blad podczas importu");
@@ -400,6 +494,15 @@ export default function ImportPage() {
           </div>
         </div>
       )}
+
+      <ProductMatchDialog
+        isOpen={matchDialog.isOpen}
+        productName={matchDialog.item?.name || ""}
+        productBrand={matchDialog.item?.brand || undefined}
+        similarProducts={matchDialog.similarProducts}
+        onSelect={handleMatchDialogSelect}
+        onCancel={handleMatchDialogCancel}
+      />
     </main>
   );
 }

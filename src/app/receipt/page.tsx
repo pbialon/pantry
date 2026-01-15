@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -13,6 +13,8 @@ import {
   X,
   Check,
 } from "lucide-react";
+import { ProductMatchDialog } from "@/components/ui/ProductMatchDialog";
+import type { Product } from "@/lib/db/schema";
 
 interface ParsedProduct {
   name: string;
@@ -20,6 +22,13 @@ interface ParsedProduct {
   category?: string;
   quantity: number;
   selected: boolean;
+}
+
+interface MatchDialogState {
+  isOpen: boolean;
+  item: ParsedProduct | null;
+  similarProducts: Product[];
+  resolve: ((productId: number | null) => void) | null;
 }
 
 const CATEGORIES = [
@@ -45,6 +54,61 @@ export default function ReceiptPage() {
   const [error, setError] = useState<string | null>(null);
   const [successCount, setSuccessCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [matchDialog, setMatchDialog] = useState<MatchDialogState>({
+    isOpen: false,
+    item: null,
+    similarProducts: [],
+    resolve: null,
+  });
+
+  const searchSimilarProducts = useCallback(async (name: string, brand: string | undefined): Promise<Product[]> => {
+    try {
+      const params = new URLSearchParams({ name });
+      if (brand) params.append("brand", brand);
+      const res = await fetch(`/api/products/search?${params}`);
+      if (res.ok) {
+        return await res.json();
+      }
+    } catch (err) {
+      console.error("Error searching products:", err);
+    }
+    return [];
+  }, []);
+
+  const showMatchDialog = useCallback((item: ParsedProduct, similarProducts: Product[]): Promise<number | null> => {
+    return new Promise((resolve) => {
+      setMatchDialog({
+        isOpen: true,
+        item,
+        similarProducts,
+        resolve,
+      });
+    });
+  }, []);
+
+  const handleMatchDialogSelect = useCallback((productId: number | null) => {
+    if (matchDialog.resolve) {
+      matchDialog.resolve(productId);
+    }
+    setMatchDialog({
+      isOpen: false,
+      item: null,
+      similarProducts: [],
+      resolve: null,
+    });
+  }, [matchDialog.resolve]);
+
+  const handleMatchDialogCancel = useCallback(() => {
+    if (matchDialog.resolve) {
+      matchDialog.resolve(null);
+    }
+    setMatchDialog({
+      isOpen: false,
+      item: null,
+      similarProducts: [],
+      resolve: null,
+    });
+  }, [matchDialog.resolve]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -162,27 +226,46 @@ export default function ReceiptPage() {
 
     try {
       for (const item of selected) {
-        const productData: { name: string; brand?: string; category?: string } = {
-          name: item.name,
-        };
-        if (item.brand) productData.brand = item.brand;
-        if (item.category) productData.category = item.category;
+        // Search for similar products first
+        const similarProducts = await searchSimilarProducts(item.name, item.brand);
 
-        const productRes = await fetch("/api/products", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(productData),
-        });
+        let productId: number | null = null;
 
-        if (!productRes.ok) continue;
+        if (similarProducts.length > 0) {
+          // Show dialog and wait for user selection
+          const selectedProductId = await showMatchDialog(item, similarProducts);
 
-        const product = await productRes.json();
+          if (selectedProductId !== null && selectedProductId > 0) {
+            // User selected existing product
+            productId = selectedProductId;
+          }
+        }
+
+        // Create new product if no existing was selected
+        if (productId === null) {
+          const productData: { name: string; brand?: string; category?: string } = {
+            name: item.name,
+          };
+          if (item.brand) productData.brand = item.brand;
+          if (item.category) productData.category = item.category;
+
+          const productRes = await fetch("/api/products", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(productData),
+          });
+
+          if (!productRes.ok) continue;
+
+          const product = await productRes.json();
+          productId = product.id;
+        }
 
         const inventoryRes = await fetch("/api/inventory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            product_id: product.id,
+            product_id: productId,
             quantity: item.quantity || 1,
             source: "receipt",
           }),
@@ -488,6 +571,15 @@ export default function ReceiptPage() {
           </div>
         </div>
       )}
+
+      <ProductMatchDialog
+        isOpen={matchDialog.isOpen}
+        productName={matchDialog.item?.name || ""}
+        productBrand={matchDialog.item?.brand}
+        similarProducts={matchDialog.similarProducts}
+        onSelect={handleMatchDialogSelect}
+        onCancel={handleMatchDialogCancel}
+      />
     </main>
   );
 }

@@ -355,6 +355,50 @@ export async function getFilteredTransactions(filters: TransactionFilters, userI
   return result.rows as unknown as Transaction[];
 }
 
+// Search similar products for matching
+export async function searchSimilarProducts(
+  name: string,
+  brand: string | null,
+  userId: number
+): Promise<Product[]> {
+  // Extract keywords from name (words longer than 2 chars)
+  const keywords = name
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+
+  if (keywords.length === 0) {
+    return [];
+  }
+
+  // Build search conditions for each keyword
+  const conditions: string[] = [];
+  const args: (string | number)[] = [userId];
+
+  // Match against product name
+  keywords.forEach((keyword) => {
+    conditions.push(`LOWER(name) LIKE ?`);
+    args.push(`%${keyword}%`);
+  });
+
+  // Match against brand if provided
+  if (brand) {
+    conditions.push(`LOWER(brand) LIKE ?`);
+    args.push(`%${brand.toLowerCase()}%`);
+  }
+
+  const result = await db.execute({
+    sql: `SELECT * FROM products
+          WHERE user_id = ?
+          AND (${conditions.join(" OR ")})
+          ORDER BY name
+          LIMIT 10`,
+    args,
+  });
+
+  return result.rows as unknown as Product[];
+}
+
 // Stats (user-scoped)
 export async function getStats(userId: number) {
   const [totalProducts, expiringCount, lowStockCount, categoriesCount] = await Promise.all([
