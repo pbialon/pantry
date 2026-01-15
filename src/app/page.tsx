@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Package, ScanBarcode, Receipt, ShoppingCart, TrendingUp, Plus, Minus, AlertTriangle, PackageMinus, History, BarChart3, LogOut, User, ClipboardList } from "lucide-react";
+import { Package, ScanBarcode, Receipt, ShoppingCart, TrendingUp, Plus, Minus, AlertTriangle, PackageMinus, History, BarChart3, LogOut, User, ClipboardList, Home } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
 import { NotificationSetup } from "@/components/NotificationSetup";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { formatDateTime, translateTransactionType, translateSource } from "@/lib/utils";
 
 interface Stats {
@@ -96,6 +97,7 @@ export default function Dashboard() {
           <p className="text-muted-foreground mt-1">Zarzadzaj zapasami jedzenia</p>
         </div>
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <div className="flex items-center gap-2 px-3 py-1.5 bg-muted rounded-lg">
             <User className="w-4 h-4 text-muted-foreground" />
             <span className="text-sm font-medium truncate max-w-[120px]">
@@ -149,6 +151,12 @@ export default function Dashboard() {
           icon={<BarChart3 className="w-6 h-6" />}
           label="Statystyki"
           description="Wykresy"
+        />
+        <QuickAction
+          href="/settings/household"
+          icon={<Home className="w-6 h-6" />}
+          label="Gospodarstwo"
+          description="Wspoldzielenie"
         />
       </section>
 

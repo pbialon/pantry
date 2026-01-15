@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
 import { SessionProvider } from "@/components/SessionProvider";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 const inter = Inter({ subsets: ["latin", "latin-ext"] });
 
@@ -28,19 +29,34 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
+// Script to prevent flash of wrong theme
+const themeScript = `
+  (function() {
+    const theme = localStorage.getItem('theme');
+    if (theme === 'dark' || (!theme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+      document.documentElement.classList.add('dark');
+    }
+  })();
+`;
+
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pl">
+    <html lang="pl" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className={inter.className}>
         <SessionProvider>
-          <ServiceWorkerRegister />
-          <div className="min-h-screen bg-background">
-            {children}
-          </div>
+          <ThemeProvider>
+            <ServiceWorkerRegister />
+            <div className="min-h-screen bg-background transition-colors">
+              {children}
+            </div>
+          </ThemeProvider>
         </SessionProvider>
       </body>
     </html>
